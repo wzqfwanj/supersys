@@ -1,6 +1,6 @@
 name: release
 
-# 打一个 v* 标签（或手动触发）就自动打包 Windows exe 并发布到 Releases
+# 打一个 v* 标签（或手动触发）就自动打包 Windows exe + Android APK，并发布到 Releases
 on:
   push:
     tags:
@@ -11,7 +11,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # ---------- Windows 桌面版 exe ----------
+  exe:
     runs-on: windows-latest
     steps:
       - name: 取代码
@@ -40,19 +41,69 @@ jobs:
           if (!(Test-Path dist/supersys.exe)) { throw "没有生成 dist/supersys.exe" }
           Get-Item dist/supersys.exe | Select-Object Name, Length
 
+      - name: 上传 exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: supersys-exe
+          path: dist/supersys.exe
+
+  # ---------- Android 安装包 APK ----------
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取代码
+        uses: actions/checkout@v4
+
+      - name: 装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 装 Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: 打 APK
+        run: |
+          cd android
+          gradle assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk ../supersys.apk
+
+      - name: 检查产物
+        run: |
+          ls -lh supersys.apk
+          unzip -l supersys.apk | grep -q "AndroidManifest.xml"
+          unzip -l supersys.apk | grep -q "classes.dex"
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: supersys-apk
+          path: supersys.apk
+
+  # ---------- 发布 ----------
+  release:
+    needs: [exe, apk]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: supersys-*
+          merge-multiple: true
+          path: dist
+
+      - name: 列出产物
+        run: ls -lh dist
+
       - name: 发布到 Releases
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "${{ github.ref_name }}" dist/supersys.exe
+          gh release create "${{ github.ref_name }}" dist/supersys.exe dist/supersys.apk
           --title "${{ github.ref_name }}"
           --generate-notes
           --repo "${{ github.repository }}"
-
-      - name: 上传构建产物（手动触发时）
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: supersys-windows
-          path: dist/supersys.exe
