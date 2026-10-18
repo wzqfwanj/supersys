@@ -1,0 +1,17 @@
+# 个人数据（不上传 GitHub）
+data.db
+data.db-wal
+data.db-shm
+data.json
+data.json.bak
+desktop.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 系统
+Thumbs.db
+.DS_Store

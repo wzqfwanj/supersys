@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>supersys</title>
+  <link rel="icon" href="icon.ico">
+  <link rel="stylesheet" href="styles.css?v=31">
+</head>
+<body>
+  <header class="top">
+    <h1>supersys</h1>
+  </header>
+
+  <div class="nav-row">
+    <nav id="nav" class="tabs" aria-label="分区"></nav>
+    <button id="run" type="button">执行</button>
+  </div>
+
+  <main>
+    <section class="view" id="view-status">
+      <div class="switch-row">
+        <div class="switch-item">
+          <button class="switch" type="button">基础</button>
+          <div class="slot" id="status-base">
+            <div class="row">
+              <button id="height-trigger" class="meal-link" type="button">身高</button>
+              <button id="weight-trigger" class="meal-link" type="button">体重</button>
+            </div>
+          </div>
+        </div>
+        <div class="switch-item">
+          <button class="switch on" type="button">常态</button>
+          <div class="slot on" id="status-normal">
+            <div class="row">
+              <button id="funds-trigger" class="meal-link" type="button">资金</button>
+              <button id="income-trigger" class="meal-link" type="button">收入</button>
+              <button id="meals-trigger" class="meal-link" type="button">饮食</button>
+              <button id="sport-trigger" class="meal-link" type="button">运动</button>
+              <button id="today-trigger" class="meal-link" type="button">今日</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-plan">
+      <div class="switch-row">
+        <div class="switch-item">
+          <button class="switch" type="button">基础</button>
+          <div class="slot" id="plan-base">
+            <div class="row">
+              <button id="plan-height-trigger" class="meal-link" type="button">身高</button>
+              <button id="plan-weight-trigger" class="meal-link" type="button">体重</button>
+            </div>
+          </div>
+        </div>
+        <div class="switch-item">
+          <button class="switch on" type="button">常态</button>
+          <div class="slot on" id="plan-normal">
+            <div class="row">
+              <button id="plan-funds-trigger" class="meal-link" type="button">资金</button>
+              <button id="plan-income-trigger" class="meal-link" type="button">收入</button>
+              <button id="plan-meals-trigger" class="meal-link" type="button">饮食</button>
+              <button id="plan-sport-trigger" class="meal-link" type="button">运动</button>
+              <button id="plan-today-trigger" class="meal-link" type="button">今日</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-agent">
+      <div id="agent-list" class="agent-list"></div>
+      <div class="stats">
+        <div id="stats-bars" class="stats-bars"></div>
+        <div class="stats-range"><span id="stats-start"></span><span>今天</span></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="check-modal" class="modal">
+    <div class="modal-box">
+      <div class="modal-scroll">
+        <table class="check-table">
+          <thead>
+            <tr><th>智能体</th><th>检查结果</th></tr>
+          </thead>
+          <tbody id="check-body"></tbody>
+        </table>
+      </div>
+      <button id="check-close" type="button">关闭</button>
+    </div>
+  </div>
+
+  <div id="meals-modal" class="modal">
+    <div class="modal-box">
+      <div class="modal-scroll">
+        <table class="check-table meal-table">
+          <thead>
+            <tr><th>约束条件</th><th></th></tr>
+          </thead>
+          <tbody id="meal-rows"></tbody>
+        </table>
+      </div>
+      <p id="meals-msg" class="hint"></p>
+      <div class="meal-actions">
+        <button id="meals-add" type="button">新增</button>
+        <button id="meals-ok" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="today-meals-modal" class="modal">
+    <div class="modal-box">
+      <div class="modal-scroll">
+        <table class="check-table meal-table">
+          <thead>
+            <tr><th>约束条件</th><th>满足</th></tr>
+          </thead>
+          <tbody id="today-meal-rows"></tbody>
+        </table>
+      </div>
+      <p id="today-meals-msg" class="hint"></p>
+      <div class="meal-actions">
+        <button id="today-meals-ok" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="funds-modal" class="modal">
+    <div class="modal-box">
+      <div class="funds-row">
+        <input id="funds-input" type="number" min="0" step="any" placeholder="金额">
+        <span class="unit">元</span>
+      </div>
+      <p id="funds-msg" class="hint"></p>
+      <div class="meal-actions">
+        <button id="funds-ok" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=31"></script>
+</body>
+</html>
