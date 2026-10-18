@@ -24,16 +24,23 @@ import sys
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, "frozen", False):
+    # PyInstaller 打包后：网页资源在临时解压目录，数据放在 exe 旁边
+    ROOT = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
+    DATA_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    ROOT = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = ROOT
+
 WEB_DIR = os.path.join(ROOT, "web")
 # 数据文件可用环境变量指定，便于测试时不碰真实数据。
 DB_FILE = (
     os.environ.get("SUPERSYS_DB")
     or os.environ.get("SUPERSYS_DATA")
-    or os.path.join(ROOT, "data.db")
+    or os.path.join(DATA_DIR, "data.db")
 )
 # 旧的 data.json（上一版用的），启动时如果新库是空的就迁移进来。
-LEGACY_JSON = os.environ.get("SUPERSYS_LEGACY") or os.path.join(ROOT, "data.json")
+LEGACY_JSON = os.environ.get("SUPERSYS_LEGACY") or os.path.join(DATA_DIR, "data.json")
 
 SEPARATORS = re.compile(r"[，,、；;]+")
 AMOUNT = re.compile(r"-?\d+(?:\.\d+)?")
