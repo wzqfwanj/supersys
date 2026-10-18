@@ -25,8 +25,14 @@ from PIL import Image  # noqa: E402
 
 import server  # noqa: E402
 
+# 打包成 exe 后，配置 / 日志 / 数据都放在 exe 旁边（ROOT 是临时解压目录，不能用）
+if getattr(sys, "frozen", False):
+    APP_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    APP_DIR = ROOT
+
 ICON = os.path.join(server.WEB_DIR, "icon.ico")
-LOG_FILE = os.path.join(ROOT, "desktop.log")
+LOG_FILE = os.path.join(APP_DIR, "desktop.log")
 
 
 def pick_port():
@@ -67,7 +73,7 @@ def load_icon():
 
 def remote_url():
     """exe 旁边放 desktop_config.json（{"url": "https://..."}）就连接云端服务。"""
-    config = os.path.join(ROOT, "desktop_config.json")
+    config = os.path.join(APP_DIR, "desktop_config.json")
     try:
         with open(config, encoding="utf-8") as file:
             data = json.load(file)
