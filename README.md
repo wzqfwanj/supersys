@@ -1,5 +1,8 @@
 # supersys
 
+[![release](https://img.shields.io/github/v/release/wzqfwanj/supersys)](https://github.com/wzqfwanj/supersys/releases/latest)
+[![release workflow](https://github.com/wzqfwanj/supersys/actions/workflows/release.yml/badge.svg)](https://github.com/wzqfwanj/supersys/actions/workflows/release.yml)
+
 > 极简的个人每日系统：把在意的事拆成「状态」和「规划」，「规划」里定条件，「状态」里勾选做到的事，每天点一次「执行」，让智能体检查今天有没有做到。
 
 ## 界面预览
@@ -52,6 +55,9 @@
 - 首次运行 SmartScreen 可能提示「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」；
 - 数据存在 exe 旁边的 `data.db` 里；程序目录换一份就是一份新的数据；
 - 关窗口会缩到右下角托盘，右键托盘图标可「打开 supersys」或「退出」。
+
+exe 由 GitHub Actions 自动打包：仓库里打一个 `v*` 标签（如 `v1.1.0`），
+[release 工作流](.github/workflows/release.yml) 就会在 Windows 环境里构建并自动发布到 Releases。
 
 ## 快速开始
 
@@ -136,6 +142,12 @@ data.db          SQLite 数据库（运行后生成，不提交）
   # gh 用环境变量（PowerShell）：
   $env:HTTPS_PROXY = "http://127.0.0.1:7897"
   ```
+- **发新版本**（自动打包 + 发布 exe）：
+  ```bash
+  git tag v1.1.0
+  git push origin v1.1.0
+  ```
+  推送标签后，GitHub Actions 会自动构建 Windows exe 并发布到 Releases；也可以在 Actions 页面手动触发（只产出一个构建产物，不发版）。
 
 ## 许可
 
