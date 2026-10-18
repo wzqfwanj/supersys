@@ -15,6 +15,12 @@
 | --- | --- |
 | ![智能体](docs/agent.png) | ![执行结果](docs/check.png) |
 
+手机上也做了适配，可以「添加到主屏幕」当 App 用：
+
+| 手机 · 状态 | 手机 · 智能体 |
+| --- | --- |
+| ![手机状态](docs/mobile-status.png) | ![手机智能体](docs/mobile-agent.png) |
+
 ## 功能
 
 界面是深色的，只有一个窗口、几行文字和一张图，没有多余的东西；数据全部存在本地。
@@ -88,6 +94,28 @@ python server.py        # 默认 http://127.0.0.1:8000
 python server.py 8080   # 指定端口
 ```
 
+## 手机版
+
+界面在手机上会自动适配（窄屏布局、触摸操作、弹窗从底部弹出），也可以「添加到主屏幕」当 App 用。
+
+1. 在电脑上启动带局域网访问的服务：
+
+   ```bash
+   python server.py 8000 --lan
+   ```
+
+   终端会打印类似 `手机（同一 Wi-Fi）访问：http://192.168.0.102:8000` 的地址；
+
+2. 手机连**同一个 Wi-Fi**，用浏览器打开上面打印的地址即可；
+
+3. 想更像 App：浏览器菜单里选「添加到主屏幕」（iPhone Safari：分享 → 添加到主屏幕）。
+
+说明：
+
+- 手机只是访问电脑上的页面，**数据始终存在电脑的 `data.db`**，两边看到的是同一份数据；
+- `--lan` 会让同一局域网内的设备都能访问，公共 Wi-Fi 下不要开；
+- 桌面版 exe 默认只允许本机访问；要用手机访问，用源码方式 `python server.py --lan`（或设置环境变量 `SUPERSYS_HOST=0.0.0.0`）。
+
 ## 数据
 
 - 数据库：`data.db`（SQLite，和程序放在同一目录），第一次启动时如果存在旧的 `data.json` 会自动迁移进来。
@@ -116,11 +144,13 @@ python server.py 8080   # 指定端口
 ```
 desktop.py       桌面版入口（本地服务 + pywebview 原生窗口 + 托盘图标）
 启动supersys.bat  无控制台启动桌面版
-server.py        后端（静态页面 + SQLite + REST 接口）
+server.py        后端（静态页面 + SQLite + REST 接口，支持 --lan 手机访问）
 web/index.html   页面骨架
-web/styles.css   极简样式
+web/styles.css   极简样式（含手机端适配）
 web/app.js       三个分区的交互、智能体判断、统计图
-web/icon.ico     应用图标
+web/manifest.webmanifest  手机端 PWA 配置（添加到主屏幕）
+web/icon*.png / icon.ico  应用图标
+.github/workflows/release.yml  打标签自动打包 exe 并发版
 docs/            界面截图
 requirements.txt 桌面版依赖
 data.db          SQLite 数据库（运行后生成，不提交）

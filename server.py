@@ -17,12 +17,17 @@
 """
 
 import json
+import mimetypes
 import os
 import re
+import socket
 import sqlite3
 import sys
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+# 手机端 PWA 的 manifest 要正确的 MIME 类型，浏览器才认。
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 if getattr(sys, "frozen", False):
     # PyInstaller 打包后：网页资源在临时解压目录，数据放在 exe 旁边
@@ -692,12 +697,41 @@ class Server(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+def lan_addresses():
+    """列出本机局域网 IPv4 地址（手机访问用）。"""
+    addresses = set()
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127."):
+                addresses.add(ip)
+    except OSError:
+        pass
+    if not addresses:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("8.8.8.8", 80))
+                addresses.add(sock.getsockname()[0])
+        except OSError:
+            pass
+    return sorted(addresses)
+
+
 def main():
     init_db()
     migrate_legacy_json()
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("SUPERSYS_PORT", "8000"))
-    server = Server(("127.0.0.1", port), Handler)
+    argv = sys.argv[1:]
+    flags = {item for item in argv if item.startswith("--")}
+    positional = [item for item in argv if not item.startswith("--")]
+    port = int(positional[0]) if positional else int(os.environ.get("SUPERSYS_PORT", "8000"))
+    host = os.environ.get("SUPERSYS_HOST") or ("0.0.0.0" if "--lan" in flags else "127.0.0.1")
+    server = Server((host, port), Handler)
     print(f"supersys 已启动：http://127.0.0.1:{port}", flush=True)
+    if host == "0.0.0.0":
+        for ip in lan_addresses():
+            print(f"手机（同一 Wi-Fi）访问：http://{ip}:{port}", flush=True)
+        print("提示：这是局域网访问，公共 Wi-Fi 下请不要用 --lan。", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -43,7 +43,8 @@ def pick_port():
 def start_server(port):
     server.init_db()
     server.migrate_legacy_json()
-    httpd = server.Server(("127.0.0.1", port), server.Handler)
+    host = os.environ.get("SUPERSYS_HOST", "127.0.0.1")
+    httpd = server.Server((host, port), server.Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{port}"
     for _ in range(80):
