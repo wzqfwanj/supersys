@@ -1,27 +1,64 @@
 # supersys
 
-「状态」「规划」「智能体」三个部分：
+一个极简的**个人每日系统**：把自己在意的事情拆成「状态」和「规划」，每天点一次「执行」，让几个智能体检查今天有没有做到。
 
-- **状态**：上面「基础 / 常态」两个标签点击切换（原地显示）；「基础」里有「身高」「体重」，「常态」里有「资金」「收入」「饮食」「运动」「今日」（今日是常态的一部分，也是一个条件列表）；条件列表都是勾选表，分别对应「规划」里同名条件；「资金」「收入」是弹窗输入数字（实际金额 / 实际收入）。
-- **规划**：「基础」里有「身高」「体重」，「常态」里有「资金」「收入」「饮食」「运动」「今日」；条件列表点开弹窗编辑，每行一个条件，可新增 / 删除 / 修改，改完点「确定」一次性提交；一行就是一个条件，文字原样保存，标点不会拆开；「资金」「收入」是弹窗输入数字（目标金额 / 目标收入）。运动条件可以直接把星期写进文字里，例如「高脚杯深蹲，一三五七」（还支持「每天」「周末」「工作日」「周一到周五」「1357」，不写周几就是每天）。
-- **智能体**：点「执行」一键检查——基础看身高体重，财务看资金和收入（实际 ≥ 目标即达标，否则显示各自还差多少），饮食看饮食，运动看运动（按今天星期几判断：只算今天该做的动作，状态里勾选的算已满足，没勾的算未达标并列出还差哪些；今天没安排则提示），监管智能体目前只看「今日」。每次执行会记一条当天记录（同一天多次执行保留最后一次），智能体页面下方有最近 30 天的统计图：每根柱 = 当天达标数 / 智能体数，柱越高越好。
+界面是深色的，只有一个窗口、几行文字和一张图，没有多余的东西。数据全部存在本地。
 
-界面为暗色主题。
+## 界面预览
 
-多个窗口同时编辑也没问题：每条条件在数据库里是独立的一行，新增 / 改名 / 删除都是单行操作，不会出现"整份列表互相覆盖"。
+| 状态 · 饮食勾选 | 规划 · 条件定义 |
+| --- | --- |
+| ![状态](docs/status.png) | ![规划](docs/plan.png) |
 
-## 运行
+| 智能体 + 每日统计 | 执行结果 |
+| --- | --- |
+| ![智能体](docs/agent.png) | ![执行结果](docs/check.png) |
 
-**桌面版（推荐）**：双击桌面上的 **supersys** 图标（或项目里的「启动supersys.bat」），会打开一个独立窗口，没有浏览器地址栏。
+## 功能
 
-- 窗口右上角关闭 = **缩到右下角托盘**（程序不退出）；
-- 双击托盘图标，或右键 →「打开 supersys」，窗口重新出现；
-- 右键托盘 →「退出」才真正结束程序（本地服务也一起退出）。
+**状态 / 规划**，都分成「基础」和「常态」两部分：
 
-依赖：
+- 基础：身高、体重
+- 常态：资金、收入、饮食、运动、今日
+
+「规划」里定义每项的约束条件（每一行一个条件），「状态」里勾选自己实际做到的，两边一一对应；「资金」「收入」是数字，规划填目标、状态填实际。
+
+**5 个智能体**，点「执行」一键检查：
+
+| 智能体 | 检查什么 |
+| --- | --- |
+| 基础智能体 | 身高、体重条件是否都勾选 |
+| 财务智能体 | 实际资金 ≥ 目标资金、实际收入 ≥ 目标收入 |
+| 饮食智能体 | 饮食条件是否都勾选 |
+| 运动智能体 | 只检查**今天该做**的动作（运动条件可以按星期几安排） |
+| 监管智能体 | 目前只监管「今日」这一项 |
+
+- 没勾选 = 未达标，会列出还差哪些条件；全部满足显示「已达标」。
+- 运动条件可以直接把星期写进文字里，例如：`高脚杯深蹲，一三五七`（支持 `一、三、五、七`、`周一、周三`、`每天`、`周末`、`工作日`、`周一到周五`、`1357`；不写周几 = 每天）。
+- 每次「执行」会记一条当天记录（同一天多次执行保留最后一次），智能体页面下方是最近 30 天的统计图：每根柱 = 当天达标数 / 智能体数，柱子越高越好，鼠标悬停可看具体达标数。
+
+**桌面版**：双击图标打开独立窗口（没有浏览器地址栏），关窗口会缩到右下角托盘，右键托盘可以「打开 supersys」或「退出」。
+
+## 快速开始
+
+需要 Windows + Python 3.10 以上（用到了 `sqlite3`、`http.server` 等标准库）。
 
 ```bash
-python -m pip install -r requirements.txt   # pywebview（Edge WebView2）+ pystray + Pillow
+git clone https://github.com/wzqfwanj/supersys.git
+cd supersys
+python -m pip install -r requirements.txt
+```
+
+**桌面版（推荐）**：双击桌面上的 `supersys` 图标，或运行 `启动supersys.bat`。第一次用可以先创建快捷方式：
+
+```powershell
+$ws = New-Object -ComObject WScript.Shell
+$lnk = $ws.CreateShortcut("$env:USERPROFILE\Desktop\supersys.lnk")
+$lnk.TargetPath = (Get-Command pythonw).Source
+$lnk.Arguments = '"' + (Get-Location).Path + '\desktop.py"'
+$lnk.WorkingDirectory = (Get-Location).Path
+$lnk.IconLocation = (Get-Location).Path + "\web\icon.ico"
+$lnk.Save()
 ```
 
 **浏览器版**（调试用）：
@@ -31,13 +68,11 @@ python server.py        # 默认 http://127.0.0.1:8000
 python server.py 8080   # 指定端口
 ```
 
-后端只依赖 Python 3 标准库（数据库用标准库 `sqlite3`）；桌面窗口额外用 pywebview。
-
 ## 数据
 
-数据库文件 `data.db`（SQLite），和程序放在同一目录。第一次启动时如果存在旧的 `data.json`，会自动把里面的数据迁移进来。
-
-桌面版如果启动失败，错误会写到同目录的 `desktop.log`。
+- 数据库：`data.db`（SQLite，和程序放在同一目录），第一次启动时如果存在旧的 `data.json` 会自动迁移进来。
+- 个人数据（`data.db`、`data.json`、`desktop.log`）都写在 `.gitignore` 里，**不会提交到仓库**。
+- 桌面版启动失败的日志在 `desktop.log`。
 
 ## 接口
 
@@ -52,15 +87,38 @@ python server.py 8080   # 指定端口
 | DELETE | `/api/plan/items/<id>`、`/api/status/items/<id>` | 删除条件 |
 | POST | `/api/plan/batch`、`/api/status/batch` | 一次提交多条改动 |
 | POST | `/api/plan/amounts`、`/api/status/amounts` | 保存数字字段 `{field, amount}` |
+| GET | `/api/health` | 健康检查 |
 
-## 结构
+条件在数据库里是**一行一条**，新增 / 改名 / 删除都是单行操作，所以开多个窗口同时改也不会互相覆盖。
+
+## 项目结构
 
 ```
-desktop.py      桌面版入口（起服务 + 原生窗口）
-启动supersys.bat 无控制台启动桌面版
-server.py       最小后端（静态页面 + SQLite + REST 接口）
-web/index.html  页面骨架
-web/styles.css  极简样式
-web/app.js      三个分区的交互与智能体判断
-data.db         SQLite 数据库（运行后生成）
+desktop.py       桌面版入口（本地服务 + pywebview 原生窗口 + 托盘图标）
+启动supersys.bat  无控制台启动桌面版
+server.py        后端（静态页面 + SQLite + REST 接口）
+web/index.html   页面骨架
+web/styles.css   极简样式
+web/app.js       三个分区的交互、智能体判断、统计图
+web/icon.ico     应用图标
+docs/            界面截图
+requirements.txt 桌面版依赖
+data.db          SQLite 数据库（运行后生成，不提交）
 ```
+
+## 开发
+
+- 默认分支 `main`，开发分支 `dev`。
+- 提交推送：
+  ```bash
+  git add -A
+  git commit -m "改了什么"
+  git push
+  ```
+- 如果直连 GitHub 超时，可以给 git / gh 配本地代理，例如：
+
+  ```bash
+  git config http.proxy http://127.0.0.1:7897
+  # gh 用环境变量（PowerShell）：
+  $env:HTTPS_PROXY = "http://127.0.0.1:7897"
+  ```
