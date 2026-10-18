@@ -48,12 +48,13 @@
 
 **桌面版**：双击图标打开独立窗口（没有浏览器地址栏），关窗口会缩到右下角托盘，右键托盘可以「打开 supersys」或「退出」。
 
-## 下载（Windows）
+## 下载
 
-不想装 Python？直接下载打包好的 exe：
+不想装 Python？直接下载打包好的安装包：
 
 - **最新版**：<https://github.com/wzqfwanj/supersys/releases/latest>
-- 下载 `supersys.exe`（约 30 MB），双击运行即可，无需安装 Python 和依赖。
+- **Windows**：下载 `supersys.exe`（约 20 MB），双击运行即可，无需安装 Python 和依赖。
+- **Android**：下载 `supersys.apk` 安装（手机和电脑连同一个 Wi-Fi，第一次打开填电脑上的服务地址，见下面「手机版」）。
 
 说明：
 
