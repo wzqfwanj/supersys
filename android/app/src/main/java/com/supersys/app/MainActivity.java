@@ -19,13 +19,13 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 /**
- * supersys 手机客户端：套壳 WebView，打开电脑上跑的 supersys 服务。
- * 第一次启动输入服务地址（例如 http://192.168.0.102:8000），之后记住。
+ * supersys 手机客户端：套壳 WebView，打开电脑上或云端跑的 supersys 服务。
+ * 第一次启动输入服务地址（例如 https://你的域名/supersys/），之后记住。
  */
 public class MainActivity extends Activity {
     private static final String PREFS = "supersys";
     private static final String KEY_URL = "server_url";
-    private static final String DEFAULT_HINT = "http://192.168.0.102:8000";
+    private static final String DEFAULT_HINT = "https://example.com/supersys/";
 
     private SharedPreferences prefs;
     private WebView webView;
@@ -60,7 +60,7 @@ public class MainActivity extends Activity {
         box.addView(title);
 
         TextView hint = new TextView(this);
-        hint.setText("输入电脑上 supersys 服务的地址（手机和电脑要连同一个 Wi-Fi）。\n先在电脑上运行：python server.py 8000 --lan");
+        hint.setText("输入 supersys 服务地址：云端填 https://你的域名/supersys/；本地填电脑上 python server.py 8000 --lan 打印的 http://192.168.x.x:8000。");
         hint.setTextSize(14);
         hint.setTextColor(Color.parseColor("#8f8f8f"));
         hint.setPadding(0, dp(16), 0, dp(20));

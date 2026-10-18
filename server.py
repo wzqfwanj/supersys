@@ -20,9 +20,11 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import socket
 import sqlite3
 import sys
+import time
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
@@ -46,6 +48,74 @@ DB_FILE = (
 )
 # 旧的 data.json（上一版用的），启动时如果新库是空的就迁移进来。
 LEGACY_JSON = os.environ.get("SUPERSYS_LEGACY") or os.path.join(DATA_DIR, "data.json")
+
+# 部署到公网时设置 SUPERSYS_PASSWORD，没设置就是本地模式（不用登录）。
+AUTH_PASSWORD = os.environ.get("SUPERSYS_PASSWORD", "")
+SESSION_COOKIE = "supersys_session"
+SESSION_DAYS = 30
+SESSIONS = {}  # token -> 过期时间戳
+
+LOGIN_PAGE = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#121212">
+<title>supersys 登录</title>
+</head>
+<body>
+<form id="login-form">
+  <h1>supersys</h1>
+  <p class="hint">输入访问密码</p>
+  <input id="password" type="password" autocomplete="current-password" placeholder="密码">
+  <button type="submit">进入</button>
+  <p id="msg" class="msg"></p>
+</form>
+<script>
+const form = document.getElementById("login-form");
+const msg = document.getElementById("msg");
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  msg.textContent = "";
+  try {
+    const res = await fetch("api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: document.getElementById("password").value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "登录失败");
+    location.replace("./");
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+});
+</script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background: #121212; color: #e8e8e8;
+    font: 16px/1.7 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  form { width: min(340px, 100%); }
+  h1 { margin: 0 0 8px; font-size: 22px; letter-spacing: .5px; }
+  .hint { margin: 0 0 20px; color: #8f8f8f; font-size: 14px; }
+  input {
+    width: 100%; padding: 12px 14px; border: 1px solid #2e2e2e; border-radius: 8px;
+    background: #1c1c1c; color: #e8e8e8; font-size: 16px;
+  }
+  input:focus { outline: none; border-color: #e8e8e8; }
+  button {
+    width: 100%; margin-top: 12px; padding: 12px; border: 1px solid #e8e8e8; border-radius: 8px;
+    background: #e8e8e8; color: #121212; font-size: 15px; cursor: pointer;
+  }
+  .msg { margin: 12px 0 0; min-height: 20px; color: #ff8f8f; font-size: 13px; }
+</style>
+</body>
+</html>
+"""
 
 SEPARATORS = re.compile(r"[，,、；;]+")
 AMOUNT = re.compile(r"-?\d+(?:\.\d+)?")
@@ -501,6 +571,18 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path == "/login":
+            self._send_login_page()
+            return
+        if path == "/api/session":
+            self._json({"auth": bool(AUTH_PASSWORD), "loggedIn": self._is_authed()})
+            return
+        if not self._is_authed():
+            if path.startswith("/api/"):
+                self._json({"error": "请先登录"}, 401)
+            else:
+                self._redirect("login")
+            return
         if path == "/api/sections":
             self._json({"app": "supersys", "sections": SECTIONS, "agents": AGENTS})
         elif path in ("/api/plan", "/api/status"):
@@ -554,6 +636,28 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _handle_write(self, method):
         path = self.path.split("?")[0]
+        if path == "/api/login":
+            if method != "POST":
+                self._json({"error": "接口不存在"}, 404)
+                return
+            payload = self._read_json()
+            password = str((payload or {}).get("password") or "")
+            if not AUTH_PASSWORD or secrets.compare_digest(password, AUTH_PASSWORD):
+                token = secrets.token_urlsafe(32)
+                SESSIONS[token] = time.time() + SESSION_DAYS * 86400
+                self._json({"ok": True}, cookie=self._session_cookie(token))
+            else:
+                self._json({"error": "密码不对"}, 401)
+            return
+        if path == "/api/logout":
+            token = self._session_token()
+            if token:
+                SESSIONS.pop(token, None)
+            self._json({"ok": True}, cookie=self._session_cookie("", expire=True))
+            return
+        if not self._is_authed():
+            self._json({"error": "请先登录"}, 401)
+            return
         batch_match = BATCH_ROUTE.match(path)
         item_match = ITEM_ROUTE.match(path)
         if batch_match is None and item_match is None and path != "/api/runs":
@@ -671,11 +775,59 @@ class Handler(SimpleHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             return None
 
-    def _json(self, data, status=200):
+    # ---------- 登录 / 会话 ----------
+
+    def _session_token(self):
+        cookie = self.headers.get("Cookie") or ""
+        for part in cookie.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == SESSION_COOKIE:
+                return value
+        return None
+
+    def _is_authed(self):
+        if not AUTH_PASSWORD:
+            return True
+        token = self._session_token()
+        if not token:
+            return False
+        expiry = SESSIONS.get(token)
+        if expiry is None or expiry < time.time():
+            SESSIONS.pop(token, None)
+            return False
+        return True
+
+    def _session_cookie(self, token, expire=False):
+        cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax"
+        if expire:
+            cookie += "; Max-Age=0"
+        else:
+            cookie += f"; Max-Age={SESSION_DAYS * 86400}"
+        if (self.headers.get("X-Forwarded-Proto") or "").lower() == "https":
+            cookie += "; Secure"
+        return cookie
+
+    def _redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send_login_page(self):
+        body = LOGIN_PAGE.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, data, status=200, cookie=None):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(body)
 
@@ -728,6 +880,7 @@ def main():
     host = os.environ.get("SUPERSYS_HOST") or ("0.0.0.0" if "--lan" in flags else "127.0.0.1")
     server = Server((host, port), Handler)
     print(f"supersys 已启动：http://127.0.0.1:{port}", flush=True)
+    print("登录保护：已开启（SUPERSYS_PASSWORD）" if AUTH_PASSWORD else "登录保护：未开启（本地模式）", flush=True)
     if host == "0.0.0.0":
         for ip in lan_addresses():
             print(f"手机（同一 Wi-Fi）访问：http://{ip}:{port}", flush=True)

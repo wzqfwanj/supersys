@@ -20,3 +20,6 @@ Thumbs.db
 dist/
 build/
 *.spec
+
+# 桌面版连接云端的配置（个人地址，不提交）
+desktop_config.json

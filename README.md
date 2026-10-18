@@ -118,11 +118,48 @@ python server.py 8080   # 指定端口
 - `--lan` 会让同一局域网内的设备都能访问，公共 Wi-Fi 下不要开；
 - 桌面版 exe 默认只允许本机访问；要用手机访问，用源码方式 `python server.py --lan`（或设置环境变量 `SUPERSYS_HOST=0.0.0.0`）。
 
+## 云端部署（多端随时可用）
+
+把服务放到一台公网服务器上，手机 / 电脑都连它，就不用电脑一直开机了。
+
+1. 服务器上（Python 3.8+）：
+
+   ```bash
+   mkdir -p /opt/supersys && cd /opt/supersys
+   # 把 server.py 和 web/ 目录传上来
+   echo "SUPERSYS_PASSWORD=换成你的密码" > .env && chmod 600 .env
+   SUPERSYS_HOST=127.0.0.1 SUPERSYS_PASSWORD=你的密码 python3 server.py 8850
+   ```
+
+   建议用 systemd 常驻（`Restart=always`），数据在 `/opt/supersys/data.db`，备份拷这个文件即可。
+
+2. 用 Caddy / Nginx 反代到 `127.0.0.1:8850` 并开 HTTPS。Caddy 示例（挂在已有域名下的子路径）：
+
+   ```
+   handle_path /supersys/* {
+       reverse_proxy 127.0.0.1:8850
+   }
+   ```
+
+3. 各端连接：
+
+   - 手机浏览器 / 电脑浏览器：打开 `https://你的域名/supersys/`；
+   - 手机 APK：第一次打开填同一个地址；
+   - Windows 桌面版 exe：在 exe 旁边放 `desktop_config.json`（参考 [desktop_config.example.json](desktop_config.example.json)）：
+
+     ```json
+     { "url": "https://你的域名/supersys/" }
+     ```
+
+     有它就走云端；没有就还是本地模式。
+
+4. 设置 `SUPERSYS_PASSWORD` 后所有页面和接口都要先登录（右上角「退出」可以退出）。
+
 ## 数据
 
 - 数据库：`data.db`（SQLite，和程序放在同一目录），第一次启动时如果存在旧的 `data.json` 会自动迁移进来。
-- 个人数据（`data.db`、`data.json`、`desktop.log`）都写在 `.gitignore` 里，**不会提交到仓库**。
-- 桌面版启动失败的日志在 `desktop.log`。
+- 个人数据（`data.db`、`data.json`、`desktop.log`、`desktop_config.json`）都写在 `.gitignore` 里，**不会提交到仓库**。
+- 桌面版启动失败的日志在 `desktop.log`；云端数据在服务器上的 `/opt/supersys/data.db`。
 
 ## 接口
 

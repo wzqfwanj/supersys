@@ -532,3 +532,18 @@ button:hover {
     margin-top: 14px;
   }
 }
+
+.logout {
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.logout:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+  opacity: 1;
+}

@@ -5,6 +5,7 @@
 数据仍然存在本目录的 data.db。
 """
 
+import json
 import os
 import socket
 import sys
@@ -64,6 +65,18 @@ def load_icon():
         return Image.new("RGBA", (64, 64), (18, 18, 18, 255))
 
 
+def remote_url():
+    """exe 旁边放 desktop_config.json（{"url": "https://..."}）就连接云端服务。"""
+    config = os.path.join(ROOT, "desktop_config.json")
+    try:
+        with open(config, encoding="utf-8") as file:
+            data = json.load(file)
+        url = str(data.get("url") or "").strip()
+        return url or None
+    except (OSError, ValueError):
+        return None
+
+
 def main():
     try:
         run()
@@ -76,8 +89,13 @@ def main():
 
 def run():
     testing = bool(os.environ.get("SUPERSYS_DESKTOP_TEST"))
-    port = pick_port()
-    httpd, url = start_server(port)
+    remote = remote_url()
+    httpd = None
+    if remote:
+        url = remote
+    else:
+        port = pick_port()
+        httpd, url = start_server(port)
     window = webview.create_window(
         "supersys",
         url,
@@ -150,8 +168,9 @@ def run():
             tray.stop()
         except Exception:
             pass
-        httpd.shutdown()
-        httpd.server_close()
+        if httpd is not None:
+            httpd.shutdown()
+            httpd.server_close()
 
 
 if __name__ == "__main__":

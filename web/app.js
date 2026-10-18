@@ -3,7 +3,7 @@ const CLIENT_VERSION = "11"; // 请求里带上，便于确认页面是不是最
 const $ = (id) => document.getElementById(id);
 const nav = $("nav");
 const VIEWS = ["status", "plan", "agent"];
-const SECTION_BY_PATH = { "/api/status": "status", "/api/plan": "plan" };
+const SECTION_BY_PATH = { "api/status": "status", "api/plan": "plan" };
 let sections = [];
 let agents = [];
 let ready;
@@ -66,12 +66,16 @@ async function api(path, method = "GET", body) {
     options.body = JSON.stringify(body);
   }
   const res = await fetch(path, options);
+  if (res.status === 401) {
+    location.replace("login");
+    throw new Error("请先登录");
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "请求失败");
   return data;
 }
 
-const sectionPath = (section) => `/api/${section}`;
+const sectionPath = (section) => `api/${section}`;
 
 async function fetchSection(section) {
   const data = await api(sectionPath(section));
@@ -236,7 +240,7 @@ $("meals-ok").addEventListener("click", async () => {
     return;
   }
   try {
-    state[defineSection] = await api(`/api/${defineSection}/batch`, "POST", {
+    state[defineSection] = await api(`api/${defineSection}/batch`, "POST", {
       field: defineField,
       ops,
     });
@@ -329,7 +333,7 @@ $("today-meals-ok").addEventListener("click", async () => {
     return;
   }
   try {
-    state.status = await api("/api/status/batch", "POST", {
+    state.status = await api("api/status/batch", "POST", {
       field: checkField,
       ops: { create, rename: [], delete: remove },
     });
@@ -361,7 +365,7 @@ async function openAmount(section, field) {
 
 async function saveAmount() {
   try {
-    state[amountSection] = await api(`/api/${amountSection}/amounts`, "POST", {
+    state[amountSection] = await api(`api/${amountSection}/amounts`, "POST", {
       field: amountField,
       amount: $("funds-input").value,
     });
@@ -535,7 +539,7 @@ async function checkAll() {
 // 每天执行一次就记一条（同一天多次执行保留最后一次）
 async function recordRun(results) {
   try {
-    await api("/api/runs", "POST", { results });
+    await api("api/runs", "POST", { results });
   } catch (err) {
     // 记录失败不打断执行结果的显示
   }
@@ -556,7 +560,7 @@ async function loadStats() {
   startLabel.textContent = "";
   let runs = [];
   try {
-    runs = (await api("/api/runs")).runs || [];
+    runs = (await api("api/runs")).runs || [];
   } catch (err) {
     return;
   }
@@ -603,7 +607,20 @@ $("run").addEventListener("click", () => {
 
 /* ---------- 启动 ---------- */
 ready = (async function boot() {
-  const data = await api("/api/sections");
+  // 云端模式有登录保护，显示「退出」按钮
+  try {
+    const session = await api("api/session");
+    if (session.auth) {
+      $("logout").hidden = false;
+      $("logout").addEventListener("click", async () => {
+        await api("api/logout", "POST", {});
+        location.replace("login");
+      });
+    }
+  } catch (err) {
+    // 没登录的话 api() 已经跳到登录页了
+  }
+  const data = await api("api/sections");
   sections = data.sections;
   agents = data.agents;
   renderNav();
