@@ -39,6 +39,20 @@
 
 **桌面版**：双击图标打开独立窗口（没有浏览器地址栏），关窗口会缩到右下角托盘，右键托盘可以「打开 supersys」或「退出」。
 
+## 下载（Windows）
+
+不想装 Python？直接下载打包好的 exe：
+
+- **最新版**：<https://github.com/wzqfwanj/supersys/releases/latest>
+- 下载 `supersys.exe`（约 30 MB），双击运行即可，无需安装 Python 和依赖。
+
+说明：
+
+- 需要 Windows 10/11（自带 Edge WebView2 运行时）；
+- 首次运行 SmartScreen 可能提示「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」；
+- 数据存在 exe 旁边的 `data.db` 里；程序目录换一份就是一份新的数据；
+- 关窗口会缩到右下角托盘，右键托盘图标可「打开 supersys」或「退出」。
+
 ## 快速开始
 
 需要 Windows + Python 3.10 以上（用到了 `sqlite3`、`http.server` 等标准库）。
