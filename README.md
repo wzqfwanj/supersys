@@ -122,3 +122,8 @@ data.db          SQLite 数据库（运行后生成，不提交）
   # gh 用环境变量（PowerShell）：
   $env:HTTPS_PROXY = "http://127.0.0.1:7897"
   ```
+
+## 许可
+
+[MIT License](LICENSE)
+
