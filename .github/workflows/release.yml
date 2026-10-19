@@ -118,11 +118,17 @@ jobs:
       - name: 列出产物
         run: ls -lh dist
 
+      - name: 生成 SHA256 校验文件
+        run: |
+          cd dist
+          sha256sum supersys-pc.exe supersys-mobile.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: 发布到 Releases（PC 版 + 移动端）
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "${{ github.ref_name }}" dist/supersys-pc.exe dist/supersys-mobile.apk
+          gh release create "${{ github.ref_name }}" dist/supersys-pc.exe dist/supersys-mobile.apk dist/SHA256SUMS.txt
           --title "supersys ${{ github.ref_name }}（PC 版 + 移动端）"
-          --notes "PC 版：supersys-pc.exe（Windows）；移动端：supersys-mobile.apk（Android）。两个客户端连同一个云端服务，数据自动同步。"
+          --notes "PC 版：supersys-pc.exe（Windows，未签名，SmartScreen 提示时选「更多信息 → 仍要运行」）；移动端：supersys-mobile.apk（Android）。两个客户端连同一个云端服务。校验文件：SHA256SUMS.txt。"
           --repo "${{ github.repository }}"

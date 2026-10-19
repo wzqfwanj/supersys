@@ -59,12 +59,27 @@
 说明：
 
 - PC 版需要 Windows 10/11（自带 Edge WebView2 运行时）；
-- 首次运行 SmartScreen 可能提示「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」；
 - 关窗口会缩到右下角托盘，右键托盘图标可「打开 supersys」或「退出」；
 - 移动端首次安装需要允许「未知来源」安装。
 
-两个客户端都由 GitHub Actions 自动打包：仓库里打一个 `v*` 标签（如 `v1.4.0`），
-[release 工作流](.github/workflows/release.yml) 会构建 PC 版 exe 和移动端 APK 并自动发布到 Releases。
+### Windows 安全提示怎么处理
+
+exe 没有购买代码签名证书，Windows SmartScreen 会提示「通常不会下载 supersys-pc.exe / 已保护你的电脑」，这是正常现象，不是报毒。两种处理方式：
+
+1. 提示窗口里点 **「更多信息」→「仍要运行」**；
+2. 或右键 exe → **属性** → 勾选底部 **「解除锁定」** → 确定，之后双击即可。
+
+想确认文件没被篡改：Release 里附了 `SHA256SUMS.txt`，用命令校验：
+
+```powershell
+certutil -hashfile supersys-pc.exe SHA256
+# 和 SHA256SUMS.txt 里对应的一行对比，一致即没被改过
+```
+
+只从本仓库 Releases 下载，不要用第三方转发的文件。
+
+两个客户端都由 GitHub Actions 自动打包：仓库里打一个 `v*` 标签（如 `v1.6.0`），
+[release 工作流](.github/workflows/release.yml) 会构建 PC 版 exe 和移动端 APK（附 SHA256 校验文件）并自动发布到 Releases。
 
 ## 快速开始
 
