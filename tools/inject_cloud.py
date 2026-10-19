@@ -1,6 +1,6 @@
 """把云端服务器地址注入到客户端资源里（GitHub Actions 构建时用）。
 
-环境变量 CLOUD_URL，例如 https://wkeeli.cn/supersys/；为空时写占位（开发版）。
+环境变量 CLOUD_URL，例如 https://你的域名/supersys/；为空时写占位（开发版）。
 生成：
   web/cloud.js       给网页（PC/移动端 WebView）用
   web/cloud.json     给桌面版选择窗口、Android 客户端用
