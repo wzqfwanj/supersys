@@ -24,6 +24,7 @@ import secrets
 import socket
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -49,15 +50,24 @@ DB_FILE = (
 # 旧的 data.json（上一版用的），启动时如果新库是空的就迁移进来。
 LEGACY_JSON = os.environ.get("SUPERSYS_LEGACY") or os.path.join(DATA_DIR, "data.json")
 
-# 部署到公网时设置 SUPERSYS_PASSWORD，没设置就是本地模式（不用登录）。
-# 云端模式（手机号验证码登录 + 每用户独立数据库）；不设置就是本地单机模式。
+# 云端模式（邮箱验证码登录 + 每用户独立数据库）；不设置就是本地单机模式。
 CLOUD_MODE = os.environ.get("SUPERSYS_CLOUD", "") == "1"
-SMS_MODE = os.environ.get("SUPERSYS_SMS", "test")  # test: 验证码写日志 / aliyun: 发短信
 SESSION_COOKIE = "supersys_session"
 SESSION_DAYS = 30
 CODE_TTL = 300  # 验证码 5 分钟有效
-CODE_RESEND = 60  # 同一手机号 60 秒内不重复发
-PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
+CODE_RESEND = 60  # 同一邮箱 60 秒内不重复发
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# 发信配置（QQ 邮箱等 SMTP）；没配就是测试模式（验证码写日志并回显）
+SMTP_HOST = os.environ.get("SUPERSYS_SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SUPERSYS_SMTP_PORT", "465"))
+SMTP_USER = os.environ.get("SUPERSYS_SMTP_USER", "")
+SMTP_PASS = os.environ.get("SUPERSYS_SMTP_PASS", "")
+SMTP_FROM = os.environ.get("SUPERSYS_SMTP_FROM", "") or SMTP_USER
+EMAIL_MODE = "smtp" if SMTP_HOST and SMTP_USER and SMTP_PASS else "test"
+# 防刷：同一邮箱 60 秒一条；全站每天发送上限（防短信/邮件轰炸）
+CODE_DAILY_CAP = int(os.environ.get("SUPERSYS_CODE_DAILY_CAP", "200"))
+_CODE_SENT = {}  # (ip, 日期) -> 当天已发次数
+_CODE_LOCK = threading.Lock()
 
 LOGIN_PAGE = r"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -70,8 +80,8 @@ LOGIN_PAGE = r"""<!DOCTYPE html>
 <body>
 <form id="login-form">
   <h1>supersys</h1>
-  <p class="hint">手机号验证码登录</p>
-  <input id="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="手机号" maxlength="11">
+  <p class="hint">邮箱验证码登录</p>
+  <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="邮箱">
   <div class="code-row">
     <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="验证码" maxlength="6">
     <button id="send" type="button">获取验证码</button>
@@ -83,7 +93,7 @@ LOGIN_PAGE = r"""<!DOCTYPE html>
 const form = document.getElementById("login-form");
 const msg = document.getElementById("msg");
 const sendButton = document.getElementById("send");
-const phoneInput = document.getElementById("phone");
+const emailInput = document.getElementById("email");
 const codeInput = document.getElementById("code");
 let countdown = null;
 
@@ -99,16 +109,16 @@ async function post(path, body) {
 }
 
 sendButton.addEventListener("click", async () => {
-  const phone = phoneInput.value.trim();
+  const email = emailInput.value.trim();
   msg.textContent = "";
-  if (!/^1[3-9]\d{9}$/.test(phone)) { msg.textContent = "请输入正确的手机号"; return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { msg.textContent = "请输入正确的邮箱"; return; }
   try {
-    const data = await post("api/auth/request-code", { phone });
+    const data = await post("api/auth/request-code", { email });
     if (data.devCode) {
       codeInput.value = data.devCode;
       msg.textContent = "测试模式验证码：" + data.devCode;
     } else {
-      msg.textContent = "验证码已发送";
+      msg.textContent = "验证码已发送，请查收邮箱（含垃圾箱）";
     }
     let left = 60;
     sendButton.disabled = true;
@@ -133,7 +143,7 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   msg.textContent = "";
   try {
-    await post("api/auth/verify", { phone: phoneInput.value.trim(), code: codeInput.value.trim() });
+    await post("api/auth/verify", { email: emailInput.value.trim(), code: codeInput.value.trim() });
     location.replace("./");
   } catch (err) {
     msg.textContent = err.message;
@@ -281,15 +291,34 @@ def init_auth_db():
     os.makedirs(USERS_DIR, exist_ok=True)
     conn = auth_db()
     try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if columns and "email" not in columns:
+            # 旧版是按手机号注册的，补一列 email 兼容（旧手机号账号数据保留）
+            conn.executescript(
+                """
+                CREATE TABLE users_new (
+                    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    phone   TEXT,
+                    email   TEXT,
+                    created TEXT NOT NULL
+                );
+                INSERT INTO users_new (id, phone, created)
+                    SELECT id, phone, created FROM users;
+                DROP TABLE users;
+                ALTER TABLE users_new RENAME TO users;
+                """
+            )
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
                 id      INTEGER PRIMARY KEY AUTOINCREMENT,
-                phone   TEXT NOT NULL UNIQUE,
+                phone   TEXT,
+                email   TEXT,
                 created TEXT NOT NULL
             );
+            DROP TABLE IF EXISTS codes;
             CREATE TABLE IF NOT EXISTS codes (
-                phone    TEXT PRIMARY KEY,
+                email    TEXT PRIMARY KEY,
                 code     TEXT NOT NULL,
                 expires  REAL NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0,
@@ -300,6 +329,14 @@ def init_auth_db():
                 user_id INTEGER NOT NULL,
                 expires REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS email_limits (
+                email     TEXT PRIMARY KEY,
+                last_sent REAL NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique
+                ON users (email) WHERE email IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS users_phone_unique
+                ON users (phone) WHERE phone IS NOT NULL;
             """
         )
         conn.commit()
@@ -311,26 +348,27 @@ def user_db_path(user_id):
     return os.path.join(USERS_DIR, f"{user_id}.db")
 
 
-def init_user_db(user_id, phone=None):
-    """给用户建独立数据库；现有本地 data.db 的数据带过去（只带一次，归属指定手机号）。"""
+def init_user_db(user_id, email=None):
+    """给用户建独立数据库；现有数据带过去（只带一次，归属指定邮箱）。"""
     path = user_db_path(user_id)
     if os.path.exists(path):
         return path
     os.makedirs(USERS_DIR, exist_ok=True)
-    owner_phone = os.environ.get("SUPERSYS_OWNER_PHONE", "").strip()
-    claim_legacy = bool(owner_phone) and phone == owner_phone
-    if not owner_phone:
-        claim_legacy = user_id == 1
+    owner_email = os.environ.get("SUPERSYS_OWNER_EMAIL", "").strip().lower()
+    claim_legacy = bool(owner_email) and (email or "").strip().lower() == owner_email
     conn = sqlite3.connect(path, timeout=5)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
-        if claim_legacy and os.path.exists(DB_FILE):
-            src = sqlite3.connect(DB_FILE)
-            try:
-                src.backup(conn)
-            finally:
-                src.close()
+        if claim_legacy:
+            # 优先接管之前手机号账号的数据（users/1.db），否则用本地 data.db
+            source = user_db_path(1) if os.path.exists(user_db_path(1)) else DB_FILE
+            if os.path.exists(source):
+                src = sqlite3.connect(source)
+                try:
+                    src.backup(conn)
+                finally:
+                    src.close()
         conn.commit()
     finally:
         conn.close()
@@ -348,80 +386,57 @@ def db_for_user(user_id):
     return conn
 
 
-def allowed_phones():
-    """测试阶段只允许指定手机号登录（逗号分隔），防止别人乱注册。"""
-    raw = os.environ.get("SUPERSYS_ALLOWED_PHONES", "")
-    return [item.strip() for item in raw.replace("，", ",").split(",") if item.strip()]
+def check_daily_cap(client_ip):
+    """全站每天最多发多少条验证码，防止被刷。"""
+    day = datetime.now().strftime("%Y-%m-%d")
+    with _CODE_LOCK:
+        count = _CODE_SENT.get("all", 0)
+        if count >= CODE_DAILY_CAP:
+            raise ApiError("今天的验证码发送次数已达上限，请明天再试", 429)
+        _CODE_SENT["all"] = count + 1
+        _CODE_SENT.setdefault("day", day)
 
 
 def gen_code():
     return f"{secrets.randbelow(1000000):06d}"
 
 
-def save_code(phone, code):
+def save_code(email, code):
     conn = auth_db()
     try:
         with conn:
             conn.execute(
-                "INSERT OR REPLACE INTO codes (phone, code, expires, attempts, sent_at) VALUES (?, ?, ?, 0, ?)",
-                (phone, code, time.time() + CODE_TTL, time.time()),
+                "INSERT OR REPLACE INTO codes (email, code, expires, attempts, sent_at) VALUES (?, ?, ?, 0, ?)",
+                (email, code, time.time() + CODE_TTL, time.time()),
             )
     finally:
         conn.close()
 
 
-def send_sms(phone, code):
-    """测试模式：验证码写到服务器日志；配了阿里云短信就发真短信。"""
-    if SMS_MODE != "aliyun":
-        print(f"[sms-test] {phone} 验证码 {code}", flush=True)
+def send_email(email, code):
+    """测试模式：验证码写到服务器日志；配了 SMTP 就发真邮件。"""
+    if EMAIL_MODE != "smtp":
+        print(f"[email-test] {email} 验证码 {code}", flush=True)
         return
     try:
-        import base64
-        import hashlib
-        import hmac
-        from urllib.parse import quote, urlencode
+        import smtplib
+        from email.header import Header
+        from email.mime.text import MIMEText
+        from email.utils import formataddr
 
-        key_id = os.environ["ALIYUN_SMS_KEY_ID"]
-        key_secret = os.environ["ALIYUN_SMS_KEY_SECRET"]
-        sign_name = os.environ.get("ALIYUN_SMS_SIGN", "supersys")
-        template = os.environ["ALIYUN_SMS_TEMPLATE"]
-        params = {
-            "AccessKeyId": key_id,
-            "Action": "SendSms",
-            "Format": "JSON",
-            "PhoneNumbers": phone,
-            "RegionId": "cn-hangzhou",
-            "SignName": sign_name,
-            "SignatureMethod": "HMAC-SHA1",
-            "SignatureNonce": secrets.token_hex(16),
-            "SignatureVersion": "1.0",
-            "TemplateCode": template,
-            "TemplateParam": json.dumps({"code": code}, ensure_ascii=False),
-            "Timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "Version": "2017-05-25",
-        }
-        canonical = "&".join(
-            f"{quote(str(key))}={quote(str(value))}"
-            for key, value in sorted(params.items())
+        body = (
+            f"你的 supersys 验证码是：{code}\n"
+            f"5 分钟内有效。如果不是你本人操作，请忽略这封邮件。"
         )
-        string_to_sign = "GET&%2F&" + quote(canonical, safe="")
-        signature = base64.b64encode(
-            hmac.new(
-                (key_secret + "&").encode("utf-8"),
-                string_to_sign.encode("utf-8"),
-                hashlib.sha1,
-            ).digest()
-        ).decode("utf-8")
-        params["Signature"] = signature
-        url = "https://dysmsapi.aliyuncs.com/?" + urlencode(params)
-        with urllib.request.urlopen(url, timeout=10) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        if result.get("Code") != "OK":
-            raise ApiError("短信发送失败：" + str(result.get("Message") or result.get("Code")))
-    except ApiError:
-        raise
+        message = MIMEText(body, "plain", "utf-8")
+        message["Subject"] = Header("supersys 验证码", "utf-8")
+        message["From"] = formataddr(("supersys", SMTP_FROM))
+        message["To"] = email
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20) as smtp:
+            smtp.login(SMTP_USER, SMTP_PASS)
+            smtp.sendmail(SMTP_FROM, [email], message.as_string())
     except Exception:
-        raise ApiError("短信发送失败，请稍后再试")
+        raise ApiError("验证码邮件发送失败，请稍后再试")
 
 
 def session_user(token):
@@ -441,11 +456,11 @@ def session_user(token):
         conn.close()
 
 
-def session_phone(user_id):
+def session_email(user_id):
     conn = auth_db()
     try:
-        row = conn.execute("SELECT phone FROM users WHERE id = ?", (user_id,)).fetchone()
-        return row["phone"] if row else None
+        row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+        return row["email"] if row else None
     finally:
         conn.close()
 
@@ -822,7 +837,7 @@ class Handler(SimpleHTTPRequestHandler):
                     {
                         "auth": True,
                         "loggedIn": user_id is not None,
-                        "phone": session_phone(user_id) if user_id else None,
+                        "email": session_email(user_id) if user_id else None,
                     }
                 )
                 return
@@ -1062,49 +1077,57 @@ class Handler(SimpleHTTPRequestHandler):
             self._json({"error": "接口不存在"}, 404)
 
     def _request_code(self, payload):
-        phone = str(payload.get("phone") or "").strip()
-        if not PHONE_RE.match(phone):
-            self._json({"error": "手机号格式不对"}, 400)
-            return
-        if allowed_phones() and phone not in allowed_phones():
-            self._json({"error": "这个手机号还没有开通"}, 403)
+        email = str(payload.get("email") or "").strip().lower()
+        if not EMAIL_RE.match(email):
+            self._json({"error": "邮箱格式不对"}, 400)
             return
         conn = auth_db()
         try:
-            row = conn.execute("SELECT sent_at FROM codes WHERE phone = ?", (phone,)).fetchone()
-            if row and time.time() - row["sent_at"] < CODE_RESEND:
+            row = conn.execute(
+                "SELECT last_sent FROM email_limits WHERE email = ?", (email,)
+            ).fetchone()
+            if row and time.time() - row["last_sent"] < CODE_RESEND:
                 self._json({"error": "验证码刚发过，请稍后再试"}, 429)
                 return
-            code = gen_code()
-            with conn:
-                conn.execute(
-                    "INSERT OR REPLACE INTO codes (phone, code, expires, attempts, sent_at) VALUES (?, ?, ?, 0, ?)",
-                    (phone, code, time.time() + CODE_TTL, time.time()),
-                )
         finally:
             conn.close()
         try:
-            send_sms(phone, code)
+            check_daily_cap(self.client_address[0])
+        except ApiError as error:
+            self._json({"error": str(error)}, error.status)
+            return
+        code = gen_code()
+        save_code(email, code)
+        try:
+            send_email(email, code)
         except ApiError as error:
             self._json({"error": str(error)}, 500)
             return
-        if SMS_MODE == "aliyun":
+        conn = auth_db()
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO email_limits (email, last_sent) VALUES (?, ?)",
+                    (email, time.time()),
+                )
+        finally:
+            conn.close()
+        if EMAIL_MODE == "smtp":
             self._json({"ok": True})
         else:
             self._json({"ok": True, "testMode": True, "devCode": code})
 
     def _verify_code(self, payload):
-        phone = str(payload.get("phone") or "").strip()
+        email = str(payload.get("email") or "").strip().lower()
         code = str(payload.get("code") or "").strip()
-        if not PHONE_RE.match(phone) or not code:
-            self._json({"error": "手机号或验证码不对"}, 400)
-            return
-        if allowed_phones() and phone not in allowed_phones():
-            self._json({"error": "这个手机号还没有开通"}, 403)
+        if not EMAIL_RE.match(email) or not code:
+            self._json({"error": "邮箱或验证码不对"}, 400)
             return
         conn = auth_db()
         try:
-            row = conn.execute("SELECT code, expires, attempts FROM codes WHERE phone = ?", (phone,)).fetchone()
+            row = conn.execute(
+                "SELECT code, expires, attempts FROM codes WHERE email = ?", (email,)
+            ).fetchone()
             if row is None:
                 self._json({"error": "请先获取验证码"}, 400)
                 return
@@ -1116,18 +1139,18 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             if not secrets.compare_digest(row["code"], code):
                 with conn:
-                    conn.execute("UPDATE codes SET attempts = attempts + 1 WHERE phone = ?", (phone,))
+                    conn.execute("UPDATE codes SET attempts = attempts + 1 WHERE email = ?", (email,))
                 self._json({"error": "验证码不对"}, 400)
                 return
-            is_new = conn.execute("SELECT 1 FROM users WHERE phone = ?", (phone,)).fetchone() is None
+            is_new = conn.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone() is None
             with conn:
-                conn.execute("DELETE FROM codes WHERE phone = ?", (phone,))
+                conn.execute("DELETE FROM codes WHERE email = ?", (email,))
                 if is_new:
                     conn.execute(
-                        "INSERT INTO users (phone, created) VALUES (?, ?)",
-                        (phone, today_key()),
+                        "INSERT INTO users (email, created) VALUES (?, ?)",
+                        (email, today_key()),
                     )
-                user_row = conn.execute("SELECT id FROM users WHERE phone = ?", (phone,)).fetchone()
+                user_row = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
                 user_id = user_row["id"]
                 token = secrets.token_urlsafe(32)
                 conn.execute(
@@ -1137,11 +1160,20 @@ class Handler(SimpleHTTPRequestHandler):
         finally:
             conn.close()
         try:
-            init_user_db(user_id, phone)
+            init_user_db(user_id, email)
         except Exception:
             self._json({"error": "初始化用户数据失败"}, 500)
             return
-        self._json({"ok": True, "phone": phone}, cookie=self._session_cookie(token))
+        owner_email = os.environ.get("SUPERSYS_OWNER_EMAIL", "").strip().lower()
+        if is_new and owner_email and email == owner_email:
+            # 旧数据已经交接给这个邮箱账号，清掉之前的手机号占位账号
+            conn = auth_db()
+            try:
+                with conn:
+                    conn.execute("DELETE FROM users WHERE email IS NULL")
+            finally:
+                conn.close()
+        self._json({"ok": True, "email": email}, cookie=self._session_cookie(token))
 
     def _session_cookie(self, token, expire=False):
         cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax"
@@ -1228,7 +1260,13 @@ def main():
     host = os.environ.get("SUPERSYS_HOST") or ("0.0.0.0" if "--lan" in flags else "127.0.0.1")
     server = Server((host, port), Handler)
     print(f"supersys 已启动：http://127.0.0.1:{port}", flush=True)
-    print("云端模式：手机号验证码登录" if CLOUD_MODE else "本地模式：无需登录", flush=True)
+    if CLOUD_MODE:
+        print(
+            "云端模式：邮箱验证码登录（" + ("SMTP 已配置" if EMAIL_MODE == "smtp" else "测试模式，验证码写日志") + "）",
+            flush=True,
+        )
+    else:
+        print("本地模式：无需登录", flush=True)
     if host == "0.0.0.0":
         for ip in lan_addresses():
             print(f"手机（同一 Wi-Fi）访问：http://{ip}:{port}", flush=True)

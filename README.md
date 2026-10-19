@@ -54,7 +54,7 @@
 
 - **最新版**：<https://github.com/wzqfwanj/supersys/releases/latest>
 - **PC 版（Windows）**：`supersys-pc.exe`（约 20 MB），双击运行，无需安装 Python 和依赖。第一次打开会先选「本地存储」还是「云端存储」。
-- **移动端（Android）**：`supersys-mobile.apk`，装好后第一次打开选本地或云端；云端用手机号验证码登录。
+- **移动端（Android）**：`supersys-mobile.apk`，装好后第一次打开选本地或云端；云端用邮箱验证码登录。
 
 说明：
 
@@ -119,7 +119,7 @@ $lnk.Save()
 - 双击 `supersys-pc.exe` 打开独立窗口（没有浏览器地址栏）；
 - **第一次打开先选存储方式**：
   - 本地存储：数据存在 exe 旁边的 `data.db`；
-  - 云端存储：直接进手机号验证码登录（服务器地址已内置）；
+  - 云端存储：直接进邮箱验证码登录（服务器地址已内置）；
 - 选择会记在 exe 旁边的 `desktop_config.json`（删掉这个文件可以重新选）：
 
   ```json
@@ -139,16 +139,16 @@ $lnk.Save()
 
 - 安装 `supersys-mobile.apk`，第一次打开先选存储方式：
   - **本地存储**：数据只存在这台手机上（App 私有目录），离线可用，不和云端同步；
-  - **云端存储**：直接进手机号验证码登录（服务器地址已内置），多设备同步；
+  - **云端存储**：直接进邮箱验证码登录（服务器地址已内置），多设备同步；
 - 本地模式下右上角「登录」按钮可以直接进云端验证码登录页；页面右下角「⋯」可以随时切换存储方式、修改云端地址；
 - 登录后右上角「退出」可以退出登录。
 
-## 手机号验证码登录
+## 邮箱验证码登录
 
-- 云端模式使用手机号 + 验证码登录；
-- **目前是测试模式**：验证码直接显示在登录页（点「获取验证码」会自动填入），同时打印在服务器日志里，方便先跑通流程；
-- 接真实短信：在服务器环境变量里配置阿里云短信（`SUPERSYS_SMS=aliyun` + `ALIYUN_SMS_KEY_ID`、`ALIYUN_SMS_KEY_SECRET`、`ALIYUN_SMS_SIGN`、`ALIYUN_SMS_TEMPLATE`），验证码就会通过短信发送；
-- 测试阶段可以用 `SUPERSYS_ALLOWED_PHONES` 限定只允许指定手机号登录；`SUPERSYS_OWNER_PHONE` 决定现有数据归属到哪个手机号账号。
+- 云端模式使用邮箱 + 验证码登录；
+- 配置了 SMTP 后会发真邮件；**没配置 SMTP 时是测试模式**：验证码直接显示在登录页（点「获取验证码」会自动填入），同时打印在服务器日志里，方便先跑通流程；
+- 真实发信：配置 SMTP 环境变量即可（例如 QQ 邮箱：`SUPERSYS_SMTP_HOST=smtp.qq.com`、`SUPERSYS_SMTP_PORT=465`、`SUPERSYS_SMTP_USER=你的邮箱`、`SUPERSYS_SMTP_PASS=邮箱授权码`）；
+- `SUPERSYS_OWNER_EMAIL` 决定现有数据归属到哪个邮箱账号；`SUPERSYS_CODE_DAILY_CAP` 控制每天最多发多少条验证码（默认 200，防刷）。
 
 ## 云端部署（多端随时可用）
 
@@ -161,15 +161,18 @@ $lnk.Save()
    # 把 server.py 和 web/ 目录传上来
    cat > .env <<'EOF'
    SUPERSYS_CLOUD=1
-   SUPERSYS_SMS=test
-   SUPERSYS_OWNER_PHONE=你的手机号
-   SUPERSYS_ALLOWED_PHONES=你的手机号
+   SUPERSYS_OWNER_EMAIL=你的邮箱
+   # 真实发信（可选，不配就是测试模式）
+   SUPERSYS_SMTP_HOST=smtp.qq.com
+   SUPERSYS_SMTP_PORT=465
+   SUPERSYS_SMTP_USER=你的邮箱
+   SUPERSYS_SMTP_PASS=邮箱授权码
    EOF
    chmod 600 .env
    SUPERSYS_HOST=127.0.0.1 python3 server.py 8850
    ```
 
-   建议用 systemd 常驻（`Restart=always`）。每个账号的数据在 `/opt/supersys/users/<id>.db`；`data.db` 是本地模式的数据，也是首个账号（`SUPERSYS_OWNER_PHONE`）迁移数据的来源。
+   建议用 systemd 常驻（`Restart=always`）。每个账号的数据在 `/opt/supersys/users/<id>.db`；`data.db` 是本地模式的数据，也是首个账号（`SUPERSYS_OWNER_EMAIL`）迁移数据的来源。
 
    > 客户端里的云端地址是**构建时注入**的：在仓库 Settings → Variables 里设置 `SUPERSYS_CLOUD_URL`，GitHub Actions 打包时会写进客户端；代码仓库里只有占位符，不会暴露你的域名。
 
@@ -183,16 +186,16 @@ $lnk.Save()
 
 3. 各端连接：
 
-   - PC 版：第一次打开选「云端存储」，直接进手机号验证码登录（地址已内置）；要连别的服务器，选择窗口里点「使用其他服务器地址」；
+   - PC 版：第一次打开选「云端存储」，直接进邮箱验证码登录（地址已内置）；要连别的服务器，选择窗口里点「使用其他服务器地址」；
    - 手机 APK：第一次打开选「云端存储」，直接进登录页；要改地址，右下角「⋯」→「修改云端地址」；
-   - 云端数据按手机号隔离，各端登录同一手机号即可看到同一份数据。
+   - 云端数据按邮箱隔离，各端登录同一邮箱即可看到同一份数据。
 
-4. 接真实短信（可选）：环境变量设 `SUPERSYS_SMS=aliyun`，再配 `ALIYUN_SMS_KEY_ID`、`ALIYUN_SMS_KEY_SECRET`、`ALIYUN_SMS_SIGN`、`ALIYUN_SMS_TEMPLATE` 即可。
+4. 真实发信（可选）：在 `.env` 里配 `SUPERSYS_SMTP_HOST`、`SUPERSYS_SMTP_PORT`、`SUPERSYS_SMTP_USER`、`SUPERSYS_SMTP_PASS`（邮箱授权码）即可。
 
 ## 数据
 
 - 本地模式：数据库 `data.db`（SQLite，和程序放在同一目录），第一次启动时如果存在旧的 `data.json` 会自动迁移进来。
-- 云端模式：每个手机号账号一个独立数据库 `users/<id>.db`；`auth.db` 存账号、验证码、登录会话。
+- 云端模式：每个邮箱账号一个独立数据库 `users/<id>.db`；`auth.db` 存账号、验证码、登录会话。
 - 个人数据（`data.db`、`data.json`、`desktop.log`、`desktop_config.json`、`users/`、`auth.db`）都不会提交到仓库。
 - 桌面版启动失败的日志在 `desktop.log`。
 
@@ -201,9 +204,9 @@ $lnk.Save()
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/sections` | 分区 / 智能体列表 |
-| GET | `/api/session` | 当前登录状态 / 手机号 |
-| POST | `/api/auth/request-code` | 获取验证码 `{phone}` |
-| POST | `/api/auth/verify` | 校验验证码登录 `{phone, code}` |
+| GET | `/api/session` | 当前登录状态 / 邮箱 |
+| POST | `/api/auth/request-code` | 获取验证码 `{email}` |
+| POST | `/api/auth/verify` | 校验验证码登录 `{email, code}` |
 | POST | `/api/auth/logout` | 退出登录 |
 | GET | `/api/plan`、`/api/status` | 规划 / 状态数据 |
 | GET | `/api/runs` | 每天的执行记录 |
@@ -222,7 +225,7 @@ $lnk.Save()
 ```
 desktop.py       桌面版入口（原生窗口 + 托盘 + 本地/云端存储选择）
 启动supersys.bat  无控制台启动桌面版
-server.py        后端（静态资源 + SQLite + 手机号登录 + 每用户独立数据库）
+server.py        后端（静态资源 + SQLite + 邮箱验证码登录 + 每用户独立数据库）
 web/index.html   页面骨架
 web/styles.css   极简样式（含手机端适配）
 web/app.js       三个分区的交互、智能体判断、统计图、本地存储模式

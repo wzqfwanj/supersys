@@ -71,7 +71,7 @@ CHOOSER_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <h1>supersys</h1>
-<p class="hint">选择数据存在哪里：本地存储只在这台电脑上；云端存储登录手机号后多设备同步。</p>
+<p class="hint">选择数据存在哪里：本地存储只在这台电脑上；云端存储用邮箱验证码登录，多设备同步。</p>
 
 <div class="section">
   <h2>本地存储</h2>
@@ -80,7 +80,7 @@ CHOOSER_HTML = """<!DOCTYPE html>
 
 <div class="section">
   <h2>云端存储</h2>
-  <button id="cloud">登录云端（手机号验证码）</button>
+  <button id="cloud">登录云端（邮箱验证码）</button>
   <p class="advanced"><a href="#" id="advanced-link">使用其他服务器地址</a></p>
   <div class="row advanced-row" id="advanced-row" hidden>
     <input id="url" placeholder="https://你的域名/supersys/">

@@ -75,7 +75,7 @@ public class MainActivity extends Activity {
         box.addView(title);
 
         TextView hint = new TextView(this);
-        hint.setText("选择数据存在哪里：\n\n本地存储：只存在这台手机上，离线也能用。\n云端存储：手机号验证码登录，多设备同步。");
+        hint.setText("选择数据存在哪里：\n\n本地存储：只存在这台手机上，离线也能用。\n云端存储：邮箱验证码登录，多设备同步。");
         hint.setTextSize(14);
         hint.setTextColor(Color.parseColor(MUTED));
         hint.setPadding(0, dp(16), 0, dp(24));
@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         Button cloud = new Button(this);
-        cloud.setText("云端存储（手机号登录）");
+        cloud.setText("云端存储（邮箱登录）");
         cloud.setOnClickListener(v -> {
             String url = builtinCloudUrl();
             if (url.isEmpty()) url = prefs.getString(PREF_URL, "");
