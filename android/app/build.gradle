@@ -2,6 +2,9 @@ plugins {
     id 'com.android.application'
 }
 
+// 固定签名密钥：CI 里从 GitHub Secrets 恢复（本地构建没有就跳过，用默认 debug 签名）
+def signingKeystore = System.getenv("SIGNING_KEYSTORE")
+
 android {
     namespace 'com.supersys.app'
     compileSdk 34
@@ -10,13 +13,33 @@ android {
         applicationId "com.supersys.app"
         minSdk 24
         targetSdk 34
-        versionCode 7
-        versionName "1.5.1"
+        versionCode 8
+        versionName "1.6.0"
+    }
+
+    signingConfigs {
+        release {
+            if (signingKeystore) {
+                storeFile file(signingKeystore)
+                storeType "PKCS12"
+                storePassword System.getenv("SIGNING_STORE_PASSWORD")
+                keyAlias System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword System.getenv("SIGNING_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
+            if (signingKeystore) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+            if (signingKeystore) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 

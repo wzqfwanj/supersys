@@ -76,6 +76,18 @@ jobs:
           CLOUD_URL: ${{ vars.SUPERSYS_CLOUD_URL }}
         run: python tools/inject_cloud.py
 
+      - name: 恢复固定签名密钥（GitHub Secrets）
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "缺少 ANDROID_KEYSTORE_BASE64 密钥" >&2
+            exit 1
+          fi
+          mkdir -p android
+          echo "$KEYSTORE_BASE64" | base64 -d > android/supersys.p12
+          ls -l android/supersys.p12
+
       - name: 把网页资源打进 APK（本地存储模式要用）
         run: |
           mkdir -p android/app/src/main/assets
@@ -83,17 +95,27 @@ jobs:
           cp -r web android/app/src/main/assets/www
           cp web/cloud.json android/app/src/main/assets/cloud.json
 
-      - name: 打 APK
+      - name: 打 APK（固定签名）
+        env:
+          SIGNING_KEYSTORE: ${{ github.workspace }}/android/supersys.p12
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           cd android
-          gradle assembleDebug --no-daemon --stacktrace
-          cp app/build/outputs/apk/debug/app-debug.apk ../supersys.apk
+          gradle assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk ../supersys.apk
 
-      - name: 检查产物
+      - name: 检查产物和签名
         run: |
           ls -lh supersys.apk
           unzip -l supersys.apk | grep -q "AndroidManifest.xml"
           unzip -l supersys.apk | grep -q "classes.dex"
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          echo "apksigner: $APKSIGNER"
+          "$APKSIGNER" verify --print-certs supersys.apk
+          "$APKSIGNER" verify --print-certs supersys.apk | grep -qi "a58f951dca399d82903819a38fa4a46f40de90a39a11978d1a789385b52b6de7" \
+            || (echo "签名证书指纹不对！" >&2; exit 1)
           cp supersys.apk supersys-mobile.apk
 
       - name: 上传移动端 APK

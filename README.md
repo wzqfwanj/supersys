@@ -78,6 +78,17 @@ certutil -hashfile supersys-pc.exe SHA256
 
 只从本仓库 Releases 下载，不要用第三方转发的文件。
 
+### Android 升级安装
+
+- 从 **v1.6.0** 起 APK 使用固定签名密钥，之后可以直接覆盖安装升级；
+- 如果你装过 **v1.5.1 或更早** 的版本，升级时会提示「与已安装应用签名不同」，需要先**卸载旧版再装新版**（卸载会清掉手机本地模式的数据；云端数据不受影响）。
+
+APK 签名证书 SHA-256（可用于校验安装包来源）：
+
+```
+a58f951dca399d82903819a38fa4a46f40de90a39a11978d1a789385b52b6de7
+```
+
 两个客户端都由 GitHub Actions 自动打包：仓库里打一个 `v*` 标签（如 `v1.6.0`），
 [release 工作流](.github/workflows/release.yml) 会构建 PC 版 exe 和移动端 APK（附 SHA256 校验文件）并自动发布到 Releases。
 

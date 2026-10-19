@@ -32,3 +32,6 @@ auth.db
 auth.db-wal
 auth.db-shm
 users/
+
+# Android 签名密钥（不要提交）
+supersys-signing*
