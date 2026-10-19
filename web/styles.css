@@ -478,15 +478,15 @@ button:hover {
   }
 
   .modal {
-    align-items: flex-end;
-    padding: 12px;
+    align-items: center;
+    padding: 16px;
   }
 
   .modal-box {
     width: 100%;
-    max-height: 88vh;
+    max-height: 82vh;
     padding: 16px;
-    border-radius: 10px 10px 0 0;
+    border-radius: 10px;
   }
 
   .check-table {
