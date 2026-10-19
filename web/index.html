@@ -6,12 +6,15 @@
   <meta name="theme-color" content="#121212">
   <title>supersys</title>
   <link rel="icon" href="icon.ico">
-  <link rel="stylesheet" href="styles.css?v=35">
+  <link rel="stylesheet" href="styles.css?v=38">
 </head>
 <body>
   <header class="top">
     <h1>supersys</h1>
-    <button id="logout" type="button" class="logout" hidden>退出</button>
+    <div class="top-actions">
+      <button id="login" type="button" class="logout" hidden>登录</button>
+      <button id="logout" type="button" class="logout" hidden>退出</button>
+    </div>
   </header>
 
   <div class="nav-row">
@@ -143,6 +146,18 @@
     </div>
   </div>
 
-  <script src="app.js?v=37"></script>
+  <div id="login-modal" class="modal">
+    <div class="modal-box">
+      <p class="hint">登录云端：输入服务器地址，然后手机号验证码登录。本地数据不会上传。</p>
+      <input id="login-url" type="text" placeholder="https://你的域名/supersys/">
+      <p id="login-msg" class="hint"></p>
+      <div class="meal-actions">
+        <button id="login-cancel" type="button">取消</button>
+        <button id="login-ok" type="button">登录</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=38"></script>
 </body>
 </html>

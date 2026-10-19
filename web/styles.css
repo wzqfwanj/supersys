@@ -547,3 +547,14 @@ button:hover {
   border-color: var(--ink);
   opacity: 1;
 }
+.top-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#login-modal input {
+  width: 100%;
+  margin-top: 12px;
+  font-size: 14px;
+}

@@ -846,9 +846,41 @@ $("run").addEventListener("click", () => {
   if (currentView() === "agent") checkAll();
 });
 
+/* ---------- 登录云端（本地模式下也可以主动登录） ---------- */
+const CLOUD_URL_KEY = "supersys_cloud_url";
+
+function openLoginDialog() {
+  $("login-url").value = localStorage.getItem(CLOUD_URL_KEY) || "";
+  $("login-msg").textContent = "";
+  $("login-modal").classList.add("on");
+  $("login-url").focus();
+}
+
+$("login").addEventListener("click", openLoginDialog);
+$("login-cancel").addEventListener("click", () => $("login-modal").classList.remove("on"));
+$("login-modal").addEventListener("click", (event) => {
+  if (event.target === $("login-modal")) $("login-modal").classList.remove("on");
+});
+$("login-ok").addEventListener("click", () => {
+  let url = $("login-url").value.trim();
+  const msg = $("login-msg");
+  if (!url) {
+    msg.textContent = "请输入服务器地址";
+    return;
+  }
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  if (!url.endsWith("/")) url += "/";
+  try {
+    localStorage.setItem(CLOUD_URL_KEY, url);
+  } catch (err) {
+    // file:// 下 localStorage 不可用时忽略
+  }
+  location.href = url + "login";
+});
+
 /* ---------- 启动 ---------- */
 ready = (async function boot() {
-  // 云端模式有登录保护，显示「退出」按钮
+  // 云端模式显示「退出」，本地模式显示「登录」（可以主动登录云端）
   try {
     const session = await api("api/session");
     if (session.auth) {
@@ -857,6 +889,8 @@ ready = (async function boot() {
         await api("api/auth/logout", "POST", {});
         location.replace("login");
       });
+    } else {
+      $("login").hidden = false;
     }
   } catch (err) {
     // 没登录的话 api() 已经跳到登录页了
