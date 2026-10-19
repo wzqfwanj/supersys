@@ -64,6 +64,9 @@ CHOOSER_HTML = """<!DOCTYPE html>
   input:focus { outline: none; border-color: #e8e8e8; }
   .msg { margin: 10px 0 0; min-height: 18px; color: #ff8f8f; font-size: 12px; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .advanced { margin: 10px 0 0; font-size: 12px; }
+  .advanced a { color: #8f8f8f; text-decoration: underline; }
+  .advanced-row { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -77,9 +80,11 @@ CHOOSER_HTML = """<!DOCTYPE html>
 
 <div class="section">
   <h2>云端存储</h2>
-  <div class="row">
-    <input id="url" placeholder="https://你的域名/supersys/" value="https://你的域名/supersys/">
-    <button class="secondary" id="cloud">连接云端</button>
+  <button id="cloud">登录云端（手机号验证码）</button>
+  <p class="advanced"><a href="#" id="advanced-link">使用其他服务器地址</a></p>
+  <div class="row advanced-row" id="advanced-row" hidden>
+    <input id="url" placeholder="https://你的域名/supersys/">
+    <button class="secondary" id="cloud-custom">连接</button>
   </div>
 </div>
 
@@ -87,6 +92,7 @@ CHOOSER_HTML = """<!DOCTYPE html>
 
 <script>
 const msg = document.getElementById("msg");
+const CLOUD_URL = "__CLOUD_URL__";
 document.getElementById("local").addEventListener("click", async () => {
   msg.textContent = "";
   try {
@@ -96,15 +102,29 @@ document.getElementById("local").addEventListener("click", async () => {
     msg.textContent = String(err);
   }
 });
-document.getElementById("cloud").addEventListener("click", async () => {
+async function connectCloud() {
   msg.textContent = "";
   try {
-    const result = await pywebview.api.choose_cloud(document.getElementById("url").value);
+    const result = await pywebview.api.choose_cloud(CLOUD_URL || document.getElementById("url").value);
     location.href = result.url;
   } catch (err) {
     msg.textContent = String(err);
   }
+}
+document.getElementById("cloud").addEventListener("click", () => {
+  if (CLOUD_URL) {
+    connectCloud();
+  } else {
+    document.getElementById("advanced-row").hidden = false;
+    document.getElementById("url").focus();
+  }
 });
+document.getElementById("advanced-link").addEventListener("click", (event) => {
+  event.preventDefault();
+  const row = document.getElementById("advanced-row");
+  row.hidden = !row.hidden;
+});
+document.getElementById("cloud-custom").addEventListener("click", connectCloud);
 </script>
 </body>
 </html>
@@ -167,6 +187,16 @@ def load_icon():
         return Image.new("RGBA", (64, 64), (18, 18, 18, 255))
 
 
+def cloud_url():
+    """构建时注入的云端地址（web/cloud.json）；本地开发没注入就返回空串。"""
+    try:
+        with open(os.path.join(server.WEB_DIR, "cloud.json"), encoding="utf-8") as file:
+            data = json.load(file)
+        return str(data.get("url") or "").strip()
+    except (OSError, ValueError):
+        return ""
+
+
 def load_config():
     """读取 exe 旁边的 desktop_config.json；没有就返回 None（表示第一次启动）。"""
     try:
@@ -208,7 +238,7 @@ def run():
         chooser = Chooser()
         window = webview.create_window(
             "supersys",
-            html=CHOOSER_HTML,
+            html=CHOOSER_HTML.replace("__CLOUD_URL__", cloud_url()),
             js_api=chooser,
             width=560,
             height=470,

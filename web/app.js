@@ -848,15 +848,43 @@ $("run").addEventListener("click", () => {
 
 /* ---------- 登录云端（本地模式下也可以主动登录） ---------- */
 const CLOUD_URL_KEY = "supersys_cloud_url";
+const BUILTIN_CLOUD_URL = (window.SUPERSYS_CLOUD_URL || "").trim();
+
+function cloudLoginUrl() {
+  const builtin = BUILTIN_CLOUD_URL.replace(/\/+$/, "");
+  if (builtin) return builtin + "/login";
+  let saved = "";
+  try {
+    saved = (localStorage.getItem(CLOUD_URL_KEY) || "").trim();
+  } catch (err) {
+    saved = "";
+  }
+  if (!saved) return "";
+  if (!/^https?:\/\//i.test(saved)) saved = "https://" + saved;
+  return saved.replace(/\/+$/, "") + "/login";
+}
 
 function openLoginDialog() {
-  $("login-url").value = localStorage.getItem(CLOUD_URL_KEY) || "";
+  $("login-url").value = "";
+  try {
+    $("login-url").value = localStorage.getItem(CLOUD_URL_KEY) || "";
+  } catch (err) {
+    // 忽略
+  }
   $("login-msg").textContent = "";
   $("login-modal").classList.add("on");
   $("login-url").focus();
 }
 
-$("login").addEventListener("click", openLoginDialog);
+$("login").addEventListener("click", () => {
+  // 内置了云端地址就直接去登录页；没有才退回手动输入（开发版 / 自定义服务器）
+  const url = cloudLoginUrl();
+  if (url) {
+    location.href = url;
+  } else {
+    openLoginDialog();
+  }
+});
 $("login-cancel").addEventListener("click", () => $("login-modal").classList.remove("on"));
 $("login-modal").addEventListener("click", (event) => {
   if (event.target === $("login-modal")) $("login-modal").classList.remove("on");

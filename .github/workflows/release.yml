@@ -29,6 +29,11 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller==6.22.3
 
+      - name: 注入云端地址（仓库变量，不写进代码）
+        env:
+          CLOUD_URL: ${{ vars.SUPERSYS_CLOUD_URL }}
+        run: python tools/inject_cloud.py
+
       - name: 打包 exe
         run: >
           python -m PyInstaller --noconfirm --clean --onefile --windowed
@@ -66,11 +71,17 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: 注入云端地址（仓库变量，不写进代码）
+        env:
+          CLOUD_URL: ${{ vars.SUPERSYS_CLOUD_URL }}
+        run: python tools/inject_cloud.py
+
       - name: 把网页资源打进 APK（本地存储模式要用）
         run: |
           mkdir -p android/app/src/main/assets
           rm -rf android/app/src/main/assets/www
           cp -r web android/app/src/main/assets/www
+          cp web/cloud.json android/app/src/main/assets/cloud.json
 
       - name: 打 APK
         run: |

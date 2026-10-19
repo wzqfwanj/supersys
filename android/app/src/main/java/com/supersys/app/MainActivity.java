@@ -22,7 +22,10 @@ import android.widget.Toast;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+
+import org.json.JSONObject;
 
 /**
  * supersys 手机客户端：
@@ -90,12 +93,13 @@ public class MainActivity extends Activity {
         Button cloud = new Button(this);
         cloud.setText("云端存储（手机号登录）");
         cloud.setOnClickListener(v -> {
-            String saved = prefs.getString(PREF_URL, "");
-            if (saved.isEmpty()) {
+            String url = builtinCloudUrl();
+            if (url.isEmpty()) url = prefs.getString(PREF_URL, "");
+            if (url.isEmpty()) {
                 showCloudSetup("");
             } else {
-                prefs.edit().putString(PREF_MODE, "cloud").apply();
-                openCloud(saved);
+                prefs.edit().putString(PREF_MODE, "cloud").putString(PREF_URL, url).apply();
+                openCloud(url);
             }
         });
         LinearLayout.LayoutParams cloudParams = new LinearLayout.LayoutParams(
@@ -106,6 +110,17 @@ public class MainActivity extends Activity {
         setContentView(box);
     }
 
+    /** 构建时注入的云端地址（assets/cloud.json）；没有就返回空串。 */
+    private String builtinCloudUrl() {
+        try (InputStream input = getAssets().open("cloud.json")) {
+            byte[] buffer = new byte[input.available()];
+            int read = input.read(buffer);
+            String text = new String(buffer, 0, Math.max(read, 0), StandardCharsets.UTF_8);
+            return new JSONObject(text).optString("url", "");
+        } catch (Exception error) {
+            return "";
+        }
+    }
     /** 云端模式：填服务器地址。 */
     private void showCloudSetup(String preset) {
         LinearLayout box = new LinearLayout(this);
