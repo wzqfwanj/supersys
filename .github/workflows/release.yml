@@ -40,12 +40,13 @@ jobs:
         run: |
           if (!(Test-Path dist/supersys.exe)) { throw "没有生成 dist/supersys.exe" }
           Get-Item dist/supersys.exe | Select-Object Name, Length
+          Copy-Item dist/supersys.exe dist/supersys-pc.exe
 
-      - name: 上传 exe
+      - name: 上传 PC 版 exe
         uses: actions/upload-artifact@v4
         with:
-          name: supersys-exe
-          path: dist/supersys.exe
+          name: supersys-pc
+          path: dist/supersys-pc.exe
 
   # ---------- Android 安装包 APK ----------
   apk:
@@ -76,12 +77,13 @@ jobs:
           ls -lh supersys.apk
           unzip -l supersys.apk | grep -q "AndroidManifest.xml"
           unzip -l supersys.apk | grep -q "classes.dex"
+          cp supersys.apk supersys-mobile.apk
 
-      - name: 上传 APK
+      - name: 上传移动端 APK
         uses: actions/upload-artifact@v4
         with:
-          name: supersys-apk
-          path: supersys.apk
+          name: supersys-mobile
+          path: supersys-mobile.apk
 
   # ---------- 发布 ----------
   release:
@@ -99,11 +101,11 @@ jobs:
       - name: 列出产物
         run: ls -lh dist
 
-      - name: 发布到 Releases
+      - name: 发布到 Releases（PC 版 + 移动端）
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "${{ github.ref_name }}" dist/supersys.exe dist/supersys.apk
-          --title "${{ github.ref_name }}"
-          --generate-notes
+          gh release create "${{ github.ref_name }}" dist/supersys-pc.exe dist/supersys-mobile.apk
+          --title "supersys ${{ github.ref_name }}（PC 版 + 移动端）"
+          --notes "PC 版：supersys-pc.exe（Windows）；移动端：supersys-mobile.apk（Android）。两个客户端连同一个云端服务，数据自动同步。"
           --repo "${{ github.repository }}"

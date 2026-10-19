@@ -15,7 +15,7 @@
 | --- | --- |
 | ![智能体](docs/agent.png) | ![执行结果](docs/check.png) |
 
-手机上也做了适配，可以「添加到主屏幕」当 App 用：
+移动端（Android App）也做了适配：
 
 | 手机 · 状态 | 手机 · 智能体 |
 | --- | --- |
@@ -50,21 +50,21 @@
 
 ## 下载
 
-不想装 Python？直接下载打包好的安装包：
+两个客户端，连同一个云端服务，数据自动同步：
 
 - **最新版**：<https://github.com/wzqfwanj/supersys/releases/latest>
-- **Windows**：下载 `supersys.exe`（约 20 MB），双击运行即可，无需安装 Python 和依赖。
-- **Android**：下载 `supersys.apk` 安装（手机和电脑连同一个 Wi-Fi，第一次打开填电脑上的服务地址，见下面「手机版」）。
+- **PC 版（Windows）**：`supersys-pc.exe`（约 20 MB），双击运行，无需安装 Python 和依赖。连云端就在 exe 旁边放 `desktop_config.json`（见下面「PC 版」）。
+- **移动端（Android）**：`supersys-mobile.apk`，安装后打开，填云端地址登录。
 
 说明：
 
-- 需要 Windows 10/11（自带 Edge WebView2 运行时）；
+- PC 版需要 Windows 10/11（自带 Edge WebView2 运行时）；
 - 首次运行 SmartScreen 可能提示「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」；
-- 数据存在 exe 旁边的 `data.db` 里；程序目录换一份就是一份新的数据；
-- 关窗口会缩到右下角托盘，右键托盘图标可「打开 supersys」或「退出」。
+- 关窗口会缩到右下角托盘，右键托盘图标可「打开 supersys」或「退出」；
+- 移动端首次安装需要允许「未知来源」安装。
 
-exe 由 GitHub Actions 自动打包：仓库里打一个 `v*` 标签（如 `v1.1.0`），
-[release 工作流](.github/workflows/release.yml) 就会在 Windows 环境里构建并自动发布到 Releases。
+两个客户端都由 GitHub Actions 自动打包：仓库里打一个 `v*` 标签（如 `v1.4.0`），
+[release 工作流](.github/workflows/release.yml) 会构建 PC 版 exe 和移动端 APK 并自动发布到 Releases。
 
 ## 快速开始
 
@@ -88,35 +88,23 @@ $lnk.IconLocation = (Get-Location).Path + "\web\icon.ico"
 $lnk.Save()
 ```
 
-**浏览器版**（调试用）：
+## PC 版
 
-```bash
-python server.py        # 默认 http://127.0.0.1:8000
-python server.py 8080   # 指定端口
-```
+- 双击 `supersys-pc.exe` 打开独立窗口（没有浏览器地址栏）；
+- 连接云端：在 exe 旁边放 `desktop_config.json`：
 
-## 手机版
+  ```json
+  { "url": "https://你的域名/supersys/" }
+  ```
 
-界面在手机上会自动适配（窄屏布局、触摸操作、弹窗从底部弹出），也可以「添加到主屏幕」当 App 用。
+  有它就走云端数据；没有就是本地模式（数据在 exe 旁边的 `data.db`）；
+- 关窗口会缩到右下角托盘，右键托盘图标可「打开 supersys」或「退出」。
 
-1. 在电脑上启动带局域网访问的服务：
+## 移动端
 
-   ```bash
-   python server.py 8000 --lan
-   ```
-
-   终端会打印类似 `手机（同一 Wi-Fi）访问：http://192.168.0.102:8000` 的地址；
-
-2. 手机连**同一个 Wi-Fi**，用浏览器打开上面打印的地址即可；
-
-3. 想更像 App：直接下载 Releases 里的 `supersys.apk`（Android），装上后第一次打开填同一个地址；或者用浏览器菜单「添加到主屏幕」（iPhone Safari：分享 → 添加到主屏幕）。
-
-说明：
-
-- 手机只是访问电脑上的页面，**数据始终存在电脑的 `data.db`**，两边看到的是同一份数据；
-- APK 是套壳 WebView，右下角「⋯」可以随时改服务器地址；电脑上的服务需要开着；
-- `--lan` 会让同一局域网内的设备都能访问，公共 Wi-Fi 下不要开；
-- 桌面版 exe 默认只允许本机访问；要用手机访问，用源码方式 `python server.py --lan`（或设置环境变量 `SUPERSYS_HOST=0.0.0.0`）。
+- 安装 `supersys-mobile.apk`，第一次打开填服务地址（云端地址），之后记住；
+- 右下角「⋯」可以随时改地址；
+- 登录后右上角「退出」可以退出登录。
 
 ## 云端部署（多端随时可用）
 
@@ -143,7 +131,7 @@ python server.py 8080   # 指定端口
 
 3. 各端连接：
 
-   - 手机浏览器 / 电脑浏览器：打开 `https://你的域名/supersys/`；
+   - PC 版：按上面「PC 版」配置 `desktop_config.json`；
    - 手机 APK：第一次打开填同一个地址；
    - Windows 桌面版 exe：在 exe 旁边放 `desktop_config.json`（参考 [desktop_config.example.json](desktop_config.example.json)）：
 
@@ -183,11 +171,11 @@ python server.py 8080   # 指定端口
 ```
 desktop.py       桌面版入口（本地服务 + pywebview 原生窗口 + 托盘图标）
 启动supersys.bat  无控制台启动桌面版
-server.py        后端（静态页面 + SQLite + REST 接口，支持 --lan 手机访问）
+server.py        后端（静态资源 + SQLite + REST 接口）
 web/index.html   页面骨架
 web/styles.css   极简样式（含手机端适配）
 web/app.js       三个分区的交互、智能体判断、统计图
-web/manifest.webmanifest  手机端 PWA 配置（添加到主屏幕）
+web/manifest.webmanifest  客户端界面资源
 web/icon*.png / icon.ico  应用图标
 .github/workflows/release.yml  打标签自动打包 exe 并发版
 docs/            界面截图
