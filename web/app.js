@@ -23,6 +23,246 @@ function emptySection() {
   };
 }
 
+/* ---------- 本地存储模式（手机 App 离线用；PC 本地模式走本地服务） ---------- */
+const LOCAL_MODE =
+  location.protocol === "file:" || new URLSearchParams(location.search).has("local");
+const LOCAL_KEY = "supersys_local_data";
+const LOCAL_SECTIONS = [
+  { id: "status", name: "状态" },
+  { id: "plan", name: "规划" },
+  { id: "agent", name: "智能体" },
+];
+const LOCAL_AGENTS = [
+  { id: "base", name: "基础智能体" },
+  { id: "finance", name: "财务智能体" },
+  { id: "diet", name: "饮食智能体" },
+  { id: "sport", name: "运动智能体" },
+  { id: "supervisor", name: "监管智能体" },
+];
+const LOCAL_LIST_FIELDS = ["height", "weight", "meals", "sport", "today"];
+const WEEKDAY_CHARS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7, 七: 7 };
+
+function localEmptyStore() {
+  return {
+    items: { plan: {}, status: {} },
+    amounts: { plan: {}, status: {} },
+    runs: {},
+    nextId: 1,
+  };
+}
+
+function localLoadStore() {
+  try {
+    let raw = null;
+    if (window.SupersysNative && window.SupersysNative.loadData) {
+      raw = window.SupersysNative.loadData();
+    }
+    if (!raw) raw = localStorage.getItem(LOCAL_KEY);
+    if (!raw) return localEmptyStore();
+    const data = JSON.parse(raw);
+    if (typeof data.nextId !== "number") data.nextId = 1;
+    return data;
+  } catch (err) {
+    return localEmptyStore();
+  }
+}
+
+function localSaveStore(store) {
+  const raw = JSON.stringify(store);
+  try {
+    if (window.SupersysNative && window.SupersysNative.saveData) {
+      window.SupersysNative.saveData(raw);
+      return;
+    }
+    localStorage.setItem(LOCAL_KEY, raw);
+  } catch (err) {
+    // 存储失败时静默，界面数据还在内存里
+  }
+}
+
+// 运动条件文字里的周几：「高脚杯深蹲，一三五七」
+function localParseSportText(text) {
+  const value = String(text || "").trim();
+  const match = value.match(
+    /^(.*?)[，,、；;]\s*([一二三四五六日天七周星期礼拜每末作工到至0-9、，,；;\s\-~—和及与]+)$/
+  );
+  if (!match) return { name: value, days: [] };
+  const name = match[1].trim();
+  const spec = match[2];
+  let days = [];
+  if (spec.includes("每天")) {
+    days = [1, 2, 3, 4, 5, 6, 7];
+  } else if (spec.includes("周末")) {
+    days = [6, 7];
+  } else if (spec.includes("工作日")) {
+    days = [1, 2, 3, 4, 5];
+  } else {
+    const range = spec.match(/([1-7一二三四五六日天七])\s*[-~—到至]\s*([1-7一二三四五六日天七])/);
+    if (range) {
+      const start = WEEKDAY_CHARS[range[1]] || Number(range[1]);
+      const end = WEEKDAY_CHARS[range[2]] || Number(range[2]);
+      for (let day = start; day <= end; day += 1) days.push(day);
+    } else {
+      for (const ch of spec) if (WEEKDAY_CHARS[ch]) days.push(WEEKDAY_CHARS[ch]);
+    }
+  }
+  days = [...new Set(days)].filter((day) => day >= 1 && day <= 7).sort((a, b) => a - b);
+  return { name, days };
+}
+
+function localCleanAmount(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const text = String(value).replace(/[\s,，]/g, "");
+  return /^-?\d+(\.\d+)?$/.test(text) ? text : null;
+}
+
+function localItems(store, section, field) {
+  store.items[section] = store.items[section] || {};
+  store.items[section][field] = store.items[section][field] || [];
+  return store.items[section][field];
+}
+
+function localSection(store, section) {
+  const data = { funds: null, income: null };
+  for (const field of ["funds", "income"]) {
+    const stored = (store.amounts[section] || {})[field];
+    data[field] = stored === undefined ? null : stored;
+  }
+  for (const field of LOCAL_LIST_FIELDS) {
+    let items = [...localItems(store, section, field)];
+    if (section === "status" && field === "sport") {
+      items = items.filter((item) => item.checkedOn === todayKey());
+    }
+    data[field] = items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      days: item.days || [],
+      checkedOn: item.checkedOn || null,
+    }));
+  }
+  return data;
+}
+
+function localAddItems(store, section, field, entries) {
+  for (const entry of entries) {
+    let name = String(entry.name || "").trim().slice(0, 200);
+    let days = entry.days || [];
+    if (field === "sport") {
+      if (section === "plan") {
+        const parsed = localParseSportText(name);
+        name = parsed.name;
+        days = parsed.days;
+      } else {
+        days = [];
+      }
+    }
+    if (!name) throw new Error("条件不能为空");
+    if (section === "status") {
+      const plan = localItems(store, "plan", field);
+      if (!plan.some((item) => item.name === name)) {
+        throw new Error("「规划」里没有这个条件，先在那里定义");
+      }
+      if (field === "sport") {
+        store.items.status.sport = localItems(store, "status", "sport").filter(
+          (item) => item.checkedOn === todayKey()
+        );
+      }
+    }
+    const items = localItems(store, section, field);
+    if (items.some((item) => item.name === name)) continue;
+    items.push({
+      id: store.nextId++,
+      name,
+      days,
+      checkedOn: section === "status" && field === "sport" ? todayKey() : null,
+    });
+  }
+}
+
+function localApplyBatch(store, section, field, ops) {
+  for (const rawId of ops.delete || []) {
+    const id = Number(rawId);
+    const items = localItems(store, section, field);
+    const target = items.find((item) => item.id === id);
+    if (!target) continue;
+    store.items[section][field] = items.filter((item) => item.id !== id);
+    if (section === "plan") {
+      store.items.status[field] = localItems(store, "status", field).filter(
+        (item) => item.name !== target.name
+      );
+    }
+  }
+  for (const op of ops.rename || []) {
+    const id = Number(op && op.id !== undefined ? op.id : op[0]);
+    const rawName = op && op.name !== undefined ? op.name : op && op[1];
+    const items = localItems(store, section, field);
+    const target = items.find((item) => item.id === id);
+    if (!target || rawName === undefined) continue;
+    let name = String(rawName).trim().slice(0, 200);
+    let days = target.days;
+    if (field === "sport" && section === "plan") {
+      const parsed = localParseSportText(name);
+      name = parsed.name;
+      days = parsed.days;
+    }
+    if (!name) continue;
+    const old = target.name;
+    target.name = name;
+    target.days = days;
+    if (section === "plan") {
+      for (const statusItem of localItems(store, "status", field)) {
+        if (statusItem.name === old) statusItem.name = name;
+      }
+    }
+  }
+  const creates = (ops.create || []).map((item) =>
+    typeof item === "string" ? { name: item } : item
+  );
+  localAddItems(store, section, field, creates);
+}
+
+async function localApi(path, method = "GET", body) {
+  const store = localLoadStore();
+  const clean = path.replace(/^\/+/, "").replace(/\?.*$/, "");
+  const parts = clean.split("/");
+  if (parts[0] !== "api") throw new Error("接口不存在");
+  const resource = parts[1];
+  if (resource === "session") return { auth: false, loggedIn: true, mode: "local" };
+  if (resource === "sections") {
+    return { app: "supersys", sections: LOCAL_SECTIONS, agents: LOCAL_AGENTS };
+  }
+  if (resource === "plan" || resource === "status") {
+    const section = resource;
+    if (parts.length === 2) return localSection(store, section);
+    const action = parts[2];
+    if (action === "batch" && method === "POST") {
+      localApplyBatch(store, section, body.field, body.ops || {});
+      localSaveStore(store);
+      return localSection(store, section);
+    }
+    if (action === "amounts" && method === "POST") {
+      store.amounts[section] = store.amounts[section] || {};
+      store.amounts[section][body.field] = localCleanAmount(body.amount);
+      localSaveStore(store);
+      return localSection(store, section);
+    }
+  }
+  if (resource === "runs") {
+    if (method === "POST") {
+      const results = (body.results || []).slice(0, 20);
+      const ok = results.filter((item) => item.ok).length;
+      store.runs[todayKey()] = { ok, total: results.length, results };
+      localSaveStore(store);
+      return { ok: true, date: todayKey(), okCount: ok, total: results.length };
+    }
+    const runs = Object.entries(store.runs)
+      .map(([date, value]) => ({ date, ...value }))
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    return { runs };
+  }
+  throw new Error("接口不存在");
+}
+
 /* ---------- 分区切换 ---------- */
 function show(id) {
   for (const v of VIEWS) $(`view-${v}`).classList.toggle("on", v === id);
@@ -60,6 +300,7 @@ function setupSwitchers() {
 
 /* ---------- 接口 ---------- */
 async function api(path, method = "GET", body) {
+  if (LOCAL_MODE) return localApi(path, method, body);
   const options = { method };
   if (body !== undefined) {
     options.headers = { "Content-Type": "application/json" };
@@ -613,7 +854,7 @@ ready = (async function boot() {
     if (session.auth) {
       $("logout").hidden = false;
       $("logout").addEventListener("click", async () => {
-        await api("api/logout", "POST", {});
+        await api("api/auth/logout", "POST", {});
         location.replace("login");
       });
     }

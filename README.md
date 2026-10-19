@@ -50,11 +50,11 @@
 
 ## 下载
 
-两个客户端，连同一个云端服务，数据自动同步：
+两个客户端，都支持 **本地存储** 或 **云端存储**（二选一，互不同步）：
 
 - **最新版**：<https://github.com/wzqfwanj/supersys/releases/latest>
-- **PC 版（Windows）**：`supersys-pc.exe`（约 20 MB），双击运行，无需安装 Python 和依赖。连云端就在 exe 旁边放 `desktop_config.json`（见下面「PC 版」）。
-- **移动端（Android）**：`supersys-mobile.apk`，安装后打开，填云端地址登录。
+- **PC 版（Windows）**：`supersys-pc.exe`（约 20 MB），双击运行，无需安装 Python 和依赖。第一次打开会先选「本地存储」还是「云端存储」。
+- **移动端（Android）**：`supersys-mobile.apk`，装好后第一次打开选本地或云端；云端用手机号验证码登录。
 
 说明：
 
@@ -91,20 +91,37 @@ $lnk.Save()
 ## PC 版
 
 - 双击 `supersys-pc.exe` 打开独立窗口（没有浏览器地址栏）；
-- 连接云端：在 exe 旁边放 `desktop_config.json`：
+- **第一次打开先选存储方式**：
+  - 本地存储：数据存在 exe 旁边的 `data.db`；
+  - 云端存储：填服务器地址 → 手机号验证码登录；
+- 选择会记在 exe 旁边的 `desktop_config.json`（删掉这个文件可以重新选）：
 
   ```json
-  { "url": "https://你的域名/supersys/" }
+  { "mode": "local" }
   ```
 
-  有它就走云端数据；没有就是本地模式（数据在 exe 旁边的 `data.db`）；
+  或
+
+  ```json
+  { "mode": "cloud", "url": "https://你的域名/supersys/" }
+  ```
+
 - 关窗口会缩到右下角托盘，右键托盘图标可「打开 supersys」或「退出」。
 
 ## 移动端
 
-- 安装 `supersys-mobile.apk`，第一次打开填服务地址（云端地址），之后记住；
-- 右下角「⋯」可以随时改地址；
+- 安装 `supersys-mobile.apk`，第一次打开先选存储方式：
+  - **本地存储**：数据只存在这台手机上（App 私有目录），离线可用，不和云端同步；
+  - **云端存储**：填服务器地址，手机号验证码登录，多设备同步；
+- 页面右下角「⋯」可以随时切换存储方式；
 - 登录后右上角「退出」可以退出登录。
+
+## 手机号验证码登录
+
+- 云端模式使用手机号 + 验证码登录；
+- **目前是测试模式**：验证码直接显示在登录页（点「获取验证码」会自动填入），同时打印在服务器日志里，方便先跑通流程；
+- 接真实短信：在服务器环境变量里配置阿里云短信（`SUPERSYS_SMS=aliyun` + `ALIYUN_SMS_KEY_ID`、`ALIYUN_SMS_KEY_SECRET`、`ALIYUN_SMS_SIGN`、`ALIYUN_SMS_TEMPLATE`），验证码就会通过短信发送；
+- 测试阶段可以用 `SUPERSYS_ALLOWED_PHONES` 限定只允许指定手机号登录；`SUPERSYS_OWNER_PHONE` 决定现有数据归属到哪个手机号账号。
 
 ## 云端部署（多端随时可用）
 
@@ -115,11 +132,17 @@ $lnk.Save()
    ```bash
    mkdir -p /opt/supersys && cd /opt/supersys
    # 把 server.py 和 web/ 目录传上来
-   echo "SUPERSYS_PASSWORD=换成你的密码" > .env && chmod 600 .env
-   SUPERSYS_HOST=127.0.0.1 SUPERSYS_PASSWORD=你的密码 python3 server.py 8850
+   cat > .env <<'EOF'
+   SUPERSYS_CLOUD=1
+   SUPERSYS_SMS=test
+   SUPERSYS_OWNER_PHONE=你的手机号
+   SUPERSYS_ALLOWED_PHONES=你的手机号
+   EOF
+   chmod 600 .env
+   SUPERSYS_HOST=127.0.0.1 python3 server.py 8850
    ```
 
-   建议用 systemd 常驻（`Restart=always`），数据在 `/opt/supersys/data.db`，备份拷这个文件即可。
+   建议用 systemd 常驻（`Restart=always`）。每个账号的数据在 `/opt/supersys/users/<id>.db`；`data.db` 是本地模式的数据，也是首个账号（`SUPERSYS_OWNER_PHONE`）迁移数据的来源。
 
 2. 用 Caddy / Nginx 反代到 `127.0.0.1:8850` 并开 HTTPS。Caddy 示例（挂在已有域名下的子路径）：
 
@@ -131,29 +154,28 @@ $lnk.Save()
 
 3. 各端连接：
 
-   - PC 版：按上面「PC 版」配置 `desktop_config.json`；
-   - 手机 APK：第一次打开填同一个地址；
-   - Windows 桌面版 exe：在 exe 旁边放 `desktop_config.json`（参考 [desktop_config.example.json](desktop_config.example.json)）：
+   - PC 版：第一次打开选「云端存储」，填 `https://你的域名/supersys/`；
+   - 手机 APK：第一次打开选「云端存储」，填同一个地址；
+   - 云端数据按手机号隔离，各端登录同一手机号即可看到同一份数据。
 
-     ```json
-     { "url": "https://你的域名/supersys/" }
-     ```
-
-     有它就走云端；没有就还是本地模式。
-
-4. 设置 `SUPERSYS_PASSWORD` 后所有页面和接口都要先登录（右上角「退出」可以退出）。
+4. 接真实短信（可选）：环境变量设 `SUPERSYS_SMS=aliyun`，再配 `ALIYUN_SMS_KEY_ID`、`ALIYUN_SMS_KEY_SECRET`、`ALIYUN_SMS_SIGN`、`ALIYUN_SMS_TEMPLATE` 即可。
 
 ## 数据
 
-- 数据库：`data.db`（SQLite，和程序放在同一目录），第一次启动时如果存在旧的 `data.json` 会自动迁移进来。
-- 个人数据（`data.db`、`data.json`、`desktop.log`、`desktop_config.json`）都写在 `.gitignore` 里，**不会提交到仓库**。
-- 桌面版启动失败的日志在 `desktop.log`；云端数据在服务器上的 `/opt/supersys/data.db`。
+- 本地模式：数据库 `data.db`（SQLite，和程序放在同一目录），第一次启动时如果存在旧的 `data.json` 会自动迁移进来。
+- 云端模式：每个手机号账号一个独立数据库 `users/<id>.db`；`auth.db` 存账号、验证码、登录会话。
+- 个人数据（`data.db`、`data.json`、`desktop.log`、`desktop_config.json`、`users/`、`auth.db`）都不会提交到仓库。
+- 桌面版启动失败的日志在 `desktop.log`。
 
 ## 接口
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/sections` | 分区 / 智能体列表 |
+| GET | `/api/session` | 当前登录状态 / 手机号 |
+| POST | `/api/auth/request-code` | 获取验证码 `{phone}` |
+| POST | `/api/auth/verify` | 校验验证码登录 `{phone, code}` |
+| POST | `/api/auth/logout` | 退出登录 |
 | GET | `/api/plan`、`/api/status` | 规划 / 状态数据 |
 | GET | `/api/runs` | 每天的执行记录 |
 | POST | `/api/runs` | 保存今天执行结果 `{results}` |
@@ -169,17 +191,18 @@ $lnk.Save()
 ## 项目结构
 
 ```
-desktop.py       桌面版入口（本地服务 + pywebview 原生窗口 + 托盘图标）
+desktop.py       桌面版入口（原生窗口 + 托盘 + 本地/云端存储选择）
 启动supersys.bat  无控制台启动桌面版
-server.py        后端（静态资源 + SQLite + REST 接口）
+server.py        后端（静态资源 + SQLite + 手机号登录 + 每用户独立数据库）
 web/index.html   页面骨架
 web/styles.css   极简样式（含手机端适配）
-web/app.js       三个分区的交互、智能体判断、统计图
-web/manifest.webmanifest  客户端界面资源
-web/icon*.png / icon.ico  应用图标
-.github/workflows/release.yml  打标签自动打包 exe 并发版
+web/app.js       三个分区的交互、智能体判断、统计图、本地存储模式
+web/icon.ico     应用图标
+android/         Android 客户端工程（本地/云端存储选择、本地数据桥）
+.github/workflows/release.yml  打标签自动打包 PC + 移动端并发版
 docs/            界面截图
 requirements.txt 桌面版依赖
+desktop_config.example.json  云端连接配置示例
 data.db          SQLite 数据库（运行后生成，不提交）
 ```
 

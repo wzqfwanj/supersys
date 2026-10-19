@@ -23,3 +23,12 @@ build/
 
 # 桌面版连接云端的配置（个人地址，不提交）
 desktop_config.json
+
+# APK 构建时拷贝的网页资源
+android/app/src/main/assets/www/
+
+# 云端模式的账号 / 用户数据
+auth.db
+auth.db-wal
+auth.db-shm
+users/

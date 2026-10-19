@@ -50,12 +50,16 @@ DB_FILE = (
 LEGACY_JSON = os.environ.get("SUPERSYS_LEGACY") or os.path.join(DATA_DIR, "data.json")
 
 # 部署到公网时设置 SUPERSYS_PASSWORD，没设置就是本地模式（不用登录）。
-AUTH_PASSWORD = os.environ.get("SUPERSYS_PASSWORD", "")
+# 云端模式（手机号验证码登录 + 每用户独立数据库）；不设置就是本地单机模式。
+CLOUD_MODE = os.environ.get("SUPERSYS_CLOUD", "") == "1"
+SMS_MODE = os.environ.get("SUPERSYS_SMS", "test")  # test: 验证码写日志 / aliyun: 发短信
 SESSION_COOKIE = "supersys_session"
 SESSION_DAYS = 30
-SESSIONS = {}  # token -> 过期时间戳
+CODE_TTL = 300  # 验证码 5 分钟有效
+CODE_RESEND = 60  # 同一手机号 60 秒内不重复发
+PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
 
-LOGIN_PAGE = """<!DOCTYPE html>
+LOGIN_PAGE = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -66,25 +70,70 @@ LOGIN_PAGE = """<!DOCTYPE html>
 <body>
 <form id="login-form">
   <h1>supersys</h1>
-  <p class="hint">输入访问密码</p>
-  <input id="password" type="password" autocomplete="current-password" placeholder="密码">
-  <button type="submit">进入</button>
+  <p class="hint">手机号验证码登录</p>
+  <input id="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="手机号" maxlength="11">
+  <div class="code-row">
+    <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="验证码" maxlength="6">
+    <button id="send" type="button">获取验证码</button>
+  </div>
+  <button type="submit">登录</button>
   <p id="msg" class="msg"></p>
 </form>
 <script>
 const form = document.getElementById("login-form");
 const msg = document.getElementById("msg");
+const sendButton = document.getElementById("send");
+const phoneInput = document.getElementById("phone");
+const codeInput = document.getElementById("code");
+let countdown = null;
+
+async function post(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "请求失败");
+  return data;
+}
+
+sendButton.addEventListener("click", async () => {
+  const phone = phoneInput.value.trim();
+  msg.textContent = "";
+  if (!/^1[3-9]\d{9}$/.test(phone)) { msg.textContent = "请输入正确的手机号"; return; }
+  try {
+    const data = await post("api/auth/request-code", { phone });
+    if (data.devCode) {
+      codeInput.value = data.devCode;
+      msg.textContent = "测试模式验证码：" + data.devCode;
+    } else {
+      msg.textContent = "验证码已发送";
+    }
+    let left = 60;
+    sendButton.disabled = true;
+    sendButton.textContent = left + "s";
+    clearInterval(countdown);
+    countdown = setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        clearInterval(countdown);
+        sendButton.disabled = false;
+        sendButton.textContent = "获取验证码";
+      } else {
+        sendButton.textContent = left + "s";
+      }
+    }, 1000);
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+});
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   msg.textContent = "";
   try {
-    const res = await fetch("api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: document.getElementById("password").value }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "登录失败");
+    await post("api/auth/verify", { phone: phoneInput.value.trim(), code: codeInput.value.trim() });
     location.replace("./");
   } catch (err) {
     msg.textContent = err.message;
@@ -107,8 +156,11 @@ form.addEventListener("submit", async (event) => {
     background: #1c1c1c; color: #e8e8e8; font-size: 16px;
   }
   input:focus { outline: none; border-color: #e8e8e8; }
+  .code-row { display: flex; gap: 8px; margin-top: 10px; }
+  .code-row input { flex: 1; }
+  .code-row button { width: auto; margin-top: 0; white-space: nowrap; padding: 12px 14px; font-size: 14px; }
   button {
-    width: 100%; margin-top: 12px; padding: 12px; border: 1px solid #e8e8e8; border-radius: 8px;
+    width: 100%; margin-top: 10px; padding: 12px; border: 1px solid #e8e8e8; border-radius: 8px;
     background: #e8e8e8; color: #121212; font-size: 15px; cursor: pointer;
   }
   .msg { margin: 12px 0 0; min-height: 20px; color: #ff8f8f; font-size: 13px; }
@@ -209,6 +261,194 @@ def db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
+
+
+# ---------- 账号 / 会话 / 短信（云端模式） ----------
+
+USERS_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_FILE)), "users")
+AUTH_DB = os.path.join(os.path.dirname(os.path.abspath(DB_FILE)), "auth.db")
+
+
+def auth_db():
+    conn = sqlite3.connect(AUTH_DB, timeout=5)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
+def init_auth_db():
+    """用户、验证码、会话都存在 auth.db；每个用户的数据单独一个 users/<id>.db。"""
+    os.makedirs(USERS_DIR, exist_ok=True)
+    conn = auth_db()
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone   TEXT NOT NULL UNIQUE,
+                created TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS codes (
+                phone    TEXT PRIMARY KEY,
+                code     TEXT NOT NULL,
+                expires  REAL NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                sent_at  REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS sessions (
+                token   TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                expires REAL NOT NULL
+            );
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def user_db_path(user_id):
+    return os.path.join(USERS_DIR, f"{user_id}.db")
+
+
+def init_user_db(user_id, phone=None):
+    """给用户建独立数据库；现有本地 data.db 的数据带过去（只带一次，归属指定手机号）。"""
+    path = user_db_path(user_id)
+    if os.path.exists(path):
+        return path
+    os.makedirs(USERS_DIR, exist_ok=True)
+    owner_phone = os.environ.get("SUPERSYS_OWNER_PHONE", "").strip()
+    claim_legacy = bool(owner_phone) and phone == owner_phone
+    if not owner_phone:
+        claim_legacy = user_id == 1
+    conn = sqlite3.connect(path, timeout=5)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(SCHEMA)
+        if claim_legacy and os.path.exists(DB_FILE):
+            src = sqlite3.connect(DB_FILE)
+            try:
+                src.backup(conn)
+            finally:
+                src.close()
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+
+
+def db_for_user(user_id):
+    """云端模式按用户开库；本地模式还是直接用 data.db。"""
+    if not CLOUD_MODE or user_id is None:
+        return db()
+    init_user_db(user_id)
+    conn = sqlite3.connect(user_db_path(user_id), timeout=5)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
+def allowed_phones():
+    """测试阶段只允许指定手机号登录（逗号分隔），防止别人乱注册。"""
+    raw = os.environ.get("SUPERSYS_ALLOWED_PHONES", "")
+    return [item.strip() for item in raw.replace("，", ",").split(",") if item.strip()]
+
+
+def gen_code():
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+def save_code(phone, code):
+    conn = auth_db()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO codes (phone, code, expires, attempts, sent_at) VALUES (?, ?, ?, 0, ?)",
+                (phone, code, time.time() + CODE_TTL, time.time()),
+            )
+    finally:
+        conn.close()
+
+
+def send_sms(phone, code):
+    """测试模式：验证码写到服务器日志；配了阿里云短信就发真短信。"""
+    if SMS_MODE != "aliyun":
+        print(f"[sms-test] {phone} 验证码 {code}", flush=True)
+        return
+    try:
+        import base64
+        import hashlib
+        import hmac
+        from urllib.parse import quote, urlencode
+
+        key_id = os.environ["ALIYUN_SMS_KEY_ID"]
+        key_secret = os.environ["ALIYUN_SMS_KEY_SECRET"]
+        sign_name = os.environ.get("ALIYUN_SMS_SIGN", "supersys")
+        template = os.environ["ALIYUN_SMS_TEMPLATE"]
+        params = {
+            "AccessKeyId": key_id,
+            "Action": "SendSms",
+            "Format": "JSON",
+            "PhoneNumbers": phone,
+            "RegionId": "cn-hangzhou",
+            "SignName": sign_name,
+            "SignatureMethod": "HMAC-SHA1",
+            "SignatureNonce": secrets.token_hex(16),
+            "SignatureVersion": "1.0",
+            "TemplateCode": template,
+            "TemplateParam": json.dumps({"code": code}, ensure_ascii=False),
+            "Timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "Version": "2017-05-25",
+        }
+        canonical = "&".join(
+            f"{quote(str(key))}={quote(str(value))}"
+            for key, value in sorted(params.items())
+        )
+        string_to_sign = "GET&%2F&" + quote(canonical, safe="")
+        signature = base64.b64encode(
+            hmac.new(
+                (key_secret + "&").encode("utf-8"),
+                string_to_sign.encode("utf-8"),
+                hashlib.sha1,
+            ).digest()
+        ).decode("utf-8")
+        params["Signature"] = signature
+        url = "https://dysmsapi.aliyuncs.com/?" + urlencode(params)
+        with urllib.request.urlopen(url, timeout=10) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        if result.get("Code") != "OK":
+            raise ApiError("短信发送失败：" + str(result.get("Message") or result.get("Code")))
+    except ApiError:
+        raise
+    except Exception:
+        raise ApiError("短信发送失败，请稍后再试")
+
+
+def session_user(token):
+    if not token:
+        return None
+    conn = auth_db()
+    try:
+        row = conn.execute(
+            "SELECT user_id, expires FROM sessions WHERE token = ?", (token,)
+        ).fetchone()
+        if row is None or row["expires"] < time.time():
+            with conn:
+                conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+            return None
+        return row["user_id"]
+    finally:
+        conn.close()
+
+
+def session_phone(user_id):
+    conn = auth_db()
+    try:
+        row = conn.execute("SELECT phone FROM users WHERE id = ?", (user_id,)).fetchone()
+        return row["phone"] if row else None
+    finally:
+        conn.close()
+
 
 
 # ---------- 数据整理 ----------
@@ -571,29 +811,46 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
-        if path == "/login":
-            self._send_login_page()
-            return
-        if path == "/api/session":
-            self._json({"auth": bool(AUTH_PASSWORD), "loggedIn": self._is_authed()})
-            return
-        if not self._is_authed():
-            if path.startswith("/api/"):
-                self._json({"error": "请先登录"}, 401)
-            else:
-                self._redirect("login")
+        self.user_id = None
+        if CLOUD_MODE:
+            if path == "/login":
+                self._send_login_page()
+                return
+            if path == "/api/session":
+                user_id = self._authed_user()
+                self._json(
+                    {
+                        "auth": True,
+                        "loggedIn": user_id is not None,
+                        "phone": session_phone(user_id) if user_id else None,
+                    }
+                )
+                return
+            if path.startswith("/api/auth/"):
+                self._json({"error": "接口不存在"}, 404)
+                return
+            user_id = self._authed_user()
+            if user_id is None:
+                if path.startswith("/api/"):
+                    self._json({"error": "请先登录"}, 401)
+                else:
+                    self._redirect("login")
+                return
+            self.user_id = user_id
+        elif path == "/api/session":
+            self._json({"auth": False, "loggedIn": True, "mode": "local"})
             return
         if path == "/api/sections":
             self._json({"app": "supersys", "sections": SECTIONS, "agents": AGENTS})
         elif path in ("/api/plan", "/api/status"):
             section = path.rsplit("/", 1)[1]
-            conn = db()
+            conn = db_for_user(self.user_id)
             try:
                 self._json(load_section(conn, section))
             finally:
                 conn.close()
         elif path == "/api/runs":
-            conn = db()
+            conn = db_for_user(self.user_id)
             try:
                 rows = conn.execute(
                     "SELECT date, ok, total, detail FROM runs ORDER BY date DESC LIMIT 180"
@@ -636,28 +893,19 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _handle_write(self, method):
         path = self.path.split("?")[0]
-        if path == "/api/login":
-            if method != "POST":
-                self._json({"error": "接口不存在"}, 404)
+        self.user_id = None
+        if CLOUD_MODE:
+            if path.startswith("/api/auth/"):
+                self._handle_auth_write(path, method)
                 return
-            payload = self._read_json()
-            password = str((payload or {}).get("password") or "")
-            if not AUTH_PASSWORD or secrets.compare_digest(password, AUTH_PASSWORD):
-                token = secrets.token_urlsafe(32)
-                SESSIONS[token] = time.time() + SESSION_DAYS * 86400
-                self._json({"ok": True}, cookie=self._session_cookie(token))
-            else:
-                self._json({"error": "密码不对"}, 401)
-            return
-        if path == "/api/logout":
-            token = self._session_token()
-            if token:
-                SESSIONS.pop(token, None)
-            self._json({"ok": True}, cookie=self._session_cookie("", expire=True))
-            return
-        if not self._is_authed():
-            self._json({"error": "请先登录"}, 401)
-            return
+            if path == "/api/logout":
+                self._clear_session()
+                return
+            user_id = self._authed_user()
+            if user_id is None:
+                self._json({"error": "请先登录"}, 401)
+                return
+            self.user_id = user_id
         batch_match = BATCH_ROUTE.match(path)
         item_match = ITEM_ROUTE.match(path)
         if batch_match is None and item_match is None and path != "/api/runs":
@@ -669,7 +917,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         print(f"[save] {method} {path} {json.dumps(payload, ensure_ascii=False)}", flush=True)
 
-        conn = db()
+        conn = db_for_user(self.user_id)
         try:
             if path == "/api/runs":
                 if method != "POST":
@@ -785,17 +1033,115 @@ class Handler(SimpleHTTPRequestHandler):
                 return value
         return None
 
-    def _is_authed(self):
-        if not AUTH_PASSWORD:
-            return True
+    def _authed_user(self):
+        return session_user(self._session_token())
+
+    def _clear_session(self):
         token = self._session_token()
-        if not token:
-            return False
-        expiry = SESSIONS.get(token)
-        if expiry is None or expiry < time.time():
-            SESSIONS.pop(token, None)
-            return False
-        return True
+        if token:
+            conn = auth_db()
+            try:
+                with conn:
+                    conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+            finally:
+                conn.close()
+        self._json({"ok": True}, cookie=self._session_cookie("", expire=True))
+
+    def _handle_auth_write(self, path, method):
+        if method != "POST":
+            self._json({"error": "接口不存在"}, 404)
+            return
+        payload = self._read_json() or {}
+        if path == "/api/auth/request-code":
+            self._request_code(payload)
+        elif path == "/api/auth/verify":
+            self._verify_code(payload)
+        elif path == "/api/auth/logout":
+            self._clear_session()
+        else:
+            self._json({"error": "接口不存在"}, 404)
+
+    def _request_code(self, payload):
+        phone = str(payload.get("phone") or "").strip()
+        if not PHONE_RE.match(phone):
+            self._json({"error": "手机号格式不对"}, 400)
+            return
+        if allowed_phones() and phone not in allowed_phones():
+            self._json({"error": "这个手机号还没有开通"}, 403)
+            return
+        conn = auth_db()
+        try:
+            row = conn.execute("SELECT sent_at FROM codes WHERE phone = ?", (phone,)).fetchone()
+            if row and time.time() - row["sent_at"] < CODE_RESEND:
+                self._json({"error": "验证码刚发过，请稍后再试"}, 429)
+                return
+            code = gen_code()
+            with conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO codes (phone, code, expires, attempts, sent_at) VALUES (?, ?, ?, 0, ?)",
+                    (phone, code, time.time() + CODE_TTL, time.time()),
+                )
+        finally:
+            conn.close()
+        try:
+            send_sms(phone, code)
+        except ApiError as error:
+            self._json({"error": str(error)}, 500)
+            return
+        if SMS_MODE == "aliyun":
+            self._json({"ok": True})
+        else:
+            self._json({"ok": True, "testMode": True, "devCode": code})
+
+    def _verify_code(self, payload):
+        phone = str(payload.get("phone") or "").strip()
+        code = str(payload.get("code") or "").strip()
+        if not PHONE_RE.match(phone) or not code:
+            self._json({"error": "手机号或验证码不对"}, 400)
+            return
+        if allowed_phones() and phone not in allowed_phones():
+            self._json({"error": "这个手机号还没有开通"}, 403)
+            return
+        conn = auth_db()
+        try:
+            row = conn.execute("SELECT code, expires, attempts FROM codes WHERE phone = ?", (phone,)).fetchone()
+            if row is None:
+                self._json({"error": "请先获取验证码"}, 400)
+                return
+            if row["expires"] < time.time():
+                self._json({"error": "验证码已过期，请重新获取"}, 400)
+                return
+            if row["attempts"] >= 5:
+                self._json({"error": "尝试次数太多，请重新获取验证码"}, 429)
+                return
+            if not secrets.compare_digest(row["code"], code):
+                with conn:
+                    conn.execute("UPDATE codes SET attempts = attempts + 1 WHERE phone = ?", (phone,))
+                self._json({"error": "验证码不对"}, 400)
+                return
+            is_new = conn.execute("SELECT 1 FROM users WHERE phone = ?", (phone,)).fetchone() is None
+            with conn:
+                conn.execute("DELETE FROM codes WHERE phone = ?", (phone,))
+                if is_new:
+                    conn.execute(
+                        "INSERT INTO users (phone, created) VALUES (?, ?)",
+                        (phone, today_key()),
+                    )
+                user_row = conn.execute("SELECT id FROM users WHERE phone = ?", (phone,)).fetchone()
+                user_id = user_row["id"]
+                token = secrets.token_urlsafe(32)
+                conn.execute(
+                    "INSERT INTO sessions (token, user_id, expires) VALUES (?, ?, ?)",
+                    (token, user_id, time.time() + SESSION_DAYS * 86400),
+                )
+        finally:
+            conn.close()
+        try:
+            init_user_db(user_id, phone)
+        except Exception:
+            self._json({"error": "初始化用户数据失败"}, 500)
+            return
+        self._json({"ok": True, "phone": phone}, cookie=self._session_cookie(token))
 
     def _session_cookie(self, token, expire=False):
         cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax"
@@ -873,6 +1219,8 @@ def lan_addresses():
 def main():
     init_db()
     migrate_legacy_json()
+    if CLOUD_MODE:
+        init_auth_db()
     argv = sys.argv[1:]
     flags = {item for item in argv if item.startswith("--")}
     positional = [item for item in argv if not item.startswith("--")]
@@ -880,7 +1228,7 @@ def main():
     host = os.environ.get("SUPERSYS_HOST") or ("0.0.0.0" if "--lan" in flags else "127.0.0.1")
     server = Server((host, port), Handler)
     print(f"supersys 已启动：http://127.0.0.1:{port}", flush=True)
-    print("登录保护：已开启（SUPERSYS_PASSWORD）" if AUTH_PASSWORD else "登录保护：未开启（本地模式）", flush=True)
+    print("云端模式：手机号验证码登录" if CLOUD_MODE else "本地模式：无需登录", flush=True)
     if host == "0.0.0.0":
         for ip in lan_addresses():
             print(f"手机（同一 Wi-Fi）访问：http://{ip}:{port}", flush=True)

@@ -1,8 +1,7 @@
-"""supersys 桌面版：本地起服务 + 原生窗口 + 右下角托盘图标。
+"""supersys 桌面版：原生窗口 + 右下角托盘图标 + 本地/云端存储选择。
 
-双击桌面上的 supersys 图标（或「启动supersys.bat」）打开，独立窗口、没有浏览器地址栏；
-关掉窗口不会退出，会缩到右下角托盘；右键托盘图标可以「打开 supersys」或「退出」。
-数据仍然存在本目录的 data.db。
+第一次打开先选「本地存储」还是「云端存储」，之后记住（desktop_config.json）；
+关窗口缩到托盘，右键托盘图标可以打开或退出。
 """
 
 import json
@@ -33,6 +32,103 @@ else:
 
 ICON = os.path.join(server.WEB_DIR, "icon.ico")
 LOG_FILE = os.path.join(APP_DIR, "desktop.log")
+CONFIG_FILE = os.path.join(APP_DIR, "desktop_config.json")
+
+CHOOSER_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>supersys</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 36px 32px; background: #121212; color: #e8e8e8;
+    font: 15px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: .5px; }
+  .hint { margin: 0 0 24px; color: #8f8f8f; font-size: 13px; }
+  .section { margin-bottom: 20px; }
+  .section h2 { margin: 0 0 8px; font-size: 14px; font-weight: 500; color: #cfcfcf; }
+  button {
+    padding: 10px 18px; border: 1px solid #e8e8e8; border-radius: 6px;
+    background: #e8e8e8; color: #121212; font-size: 14px; cursor: pointer;
+  }
+  button.secondary { background: none; color: #e8e8e8; }
+  button:hover { opacity: .85; }
+  input {
+    width: 100%; margin-top: 8px; padding: 9px 12px; border: 1px solid #2e2e2e; border-radius: 6px;
+    background: #1c1c1c; color: #e8e8e8; font-size: 14px;
+  }
+  input:focus { outline: none; border-color: #e8e8e8; }
+  .msg { margin: 10px 0 0; min-height: 18px; color: #ff8f8f; font-size: 12px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<h1>supersys</h1>
+<p class="hint">选择数据存在哪里：本地存储只在这台电脑上；云端存储登录手机号后多设备同步。</p>
+
+<div class="section">
+  <h2>本地存储</h2>
+  <button id="local">使用本地存储</button>
+</div>
+
+<div class="section">
+  <h2>云端存储</h2>
+  <div class="row">
+    <input id="url" placeholder="https://你的域名/supersys/" value="https://你的域名/supersys/">
+    <button class="secondary" id="cloud">连接云端</button>
+  </div>
+</div>
+
+<p class="msg" id="msg"></p>
+
+<script>
+const msg = document.getElementById("msg");
+document.getElementById("local").addEventListener("click", async () => {
+  msg.textContent = "";
+  try {
+    const result = await pywebview.api.choose_local();
+    location.href = result.url;
+  } catch (err) {
+    msg.textContent = String(err);
+  }
+});
+document.getElementById("cloud").addEventListener("click", async () => {
+  msg.textContent = "";
+  try {
+    const result = await pywebview.api.choose_cloud(document.getElementById("url").value);
+    location.href = result.url;
+  } catch (err) {
+    msg.textContent = String(err);
+  }
+});
+</script>
+</body>
+</html>
+"""
+
+
+class Chooser:
+    """首次启动的选择窗口：选完把配置写到 exe 旁边。"""
+
+    def __init__(self):
+        self.httpd = None
+
+    def choose_local(self):
+        port = pick_port()
+        self.httpd, url = start_server(port)
+        save_config({"mode": "local"})
+        return {"url": url}
+
+    def choose_cloud(self, url):
+        url = str(url or "").strip()
+        if not url.startswith("http://") and not url.startswith("https://"):
+            raise ValueError("请输入以 http:// 或 https:// 开头的地址")
+        save_config({"mode": "cloud", "url": url})
+        return {"url": url}
 
 
 def pick_port():
@@ -71,16 +167,25 @@ def load_icon():
         return Image.new("RGBA", (64, 64), (18, 18, 18, 255))
 
 
-def remote_url():
-    """exe 旁边放 desktop_config.json（{"url": "https://..."}）就连接云端服务。"""
-    config = os.path.join(APP_DIR, "desktop_config.json")
+def load_config():
+    """读取 exe 旁边的 desktop_config.json；没有就返回 None（表示第一次启动）。"""
     try:
-        with open(config, encoding="utf-8") as file:
+        with open(CONFIG_FILE, encoding="utf-8") as file:
             data = json.load(file)
-        url = str(data.get("url") or "").strip()
-        return url or None
     except (OSError, ValueError):
         return None
+    if not isinstance(data, dict):
+        return None
+    url = str(data.get("url") or "").strip()
+    mode = data.get("mode")
+    if mode not in ("local", "cloud"):
+        mode = "cloud" if url else "local"
+    return {"mode": mode, "url": url}
+
+
+def save_config(config):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as file:
+        json.dump(config, file, ensure_ascii=False)
 
 
 def main():
@@ -95,22 +200,37 @@ def main():
 
 def run():
     testing = bool(os.environ.get("SUPERSYS_DESKTOP_TEST"))
-    remote = remote_url()
+    config = load_config()
     httpd = None
-    if remote:
-        url = remote
+    chooser = None
+
+    if config is None:
+        chooser = Chooser()
+        window = webview.create_window(
+            "supersys",
+            html=CHOOSER_HTML,
+            js_api=chooser,
+            width=560,
+            height=470,
+            min_size=(520, 420),
+            background_color="#121212",
+            hidden=testing,
+        )
     else:
-        port = pick_port()
-        httpd, url = start_server(port)
-    window = webview.create_window(
-        "supersys",
-        url,
-        width=1080,
-        height=820,
-        min_size=(720, 560),
-        background_color="#121212",
-        hidden=testing,
-    )
+        if config.get("mode") == "cloud" and config.get("url"):
+            url = config["url"]
+        else:
+            port = pick_port()
+            httpd, url = start_server(port)
+        window = webview.create_window(
+            "supersys",
+            url,
+            width=1080,
+            height=820,
+            min_size=(720, 560),
+            background_color="#121212",
+            hidden=testing,
+        )
 
     state = {"force_quit": False}
     tray = None
@@ -174,9 +294,10 @@ def run():
             tray.stop()
         except Exception:
             pass
-        if httpd is not None:
-            httpd.shutdown()
-            httpd.server_close()
+        for item in (httpd, chooser.httpd if chooser is not None else None):
+            if item is not None:
+                item.shutdown()
+                item.server_close()
 
 
 if __name__ == "__main__":
