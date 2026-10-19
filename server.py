@@ -432,7 +432,12 @@ def send_email(email, code):
         message["Subject"] = Header("supersys 验证码", "utf-8")
         message["From"] = formataddr(("supersys", SMTP_FROM))
         message["To"] = email
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20) as smtp:
+        if SMTP_PORT == 465:
+            smtp = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20)
+        else:
+            smtp = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+            smtp.starttls()
+        with smtp:
             smtp.login(SMTP_USER, SMTP_PASS)
             smtp.sendmail(SMTP_FROM, [email], message.as_string())
     except Exception:
